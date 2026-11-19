@@ -23,7 +23,7 @@ except ImportError:  # Update von 2.1: alter Updater kannte uploader.py noch nic
     except Exception:
         uploader = None
 
-VERSION = "2.3"
+VERSION = "2.4"
 import sys
 SETTINGS_FILE = os.path.join(core.APP_DIR, "settings.json")
 SESSION_DIR = os.path.join(core.APP_DIR, "gespeichert")
@@ -44,7 +44,7 @@ QUALITIES = ["1080p", "720p", "Beste"]
 DEFAULTS = {
     "channel": "ximjxstinn", "count": 10, "pre": 18, "post": 10, "min_gap": 90, "skip_start": 2,
     "w_chat": 65, "audio": True, "fmt": FORMATS[2], "vstyle": "Blur-Hintergrund", "quality": "1080p",
-    "bestof": False, "keywords": core.DEFAULT_KEYWORDS,
+    "bestof": False, "nomenu": True, "keywords": core.DEFAULT_KEYWORDS,
     "outdir": os.path.join(os.path.expanduser("~"), "Videos", "Stream Clips"),
     "auto": False, "seen": [], "autostart": False, "autoupdate": True, "last_session": "", "tray": True, "tray_hint_shown": False,
 }
@@ -225,6 +225,10 @@ class App:
         ttk.Checkbutton(left, text="Zusätzlich Best-of-Video zusammenschneiden", variable=self.v_bestof).grid(
             row=r, column=0, columnspan=3, sticky="w", pady=(4, 0))
         r += 1
+        self.v_nomenu = tk.BooleanVar(value=s.get("nomenu", True))
+        ttk.Checkbutton(left, text="Menüs, Einstellungen & Pause rausfiltern (Bildanalyse)",
+                        variable=self.v_nomenu).grid(row=r, column=0, columnspan=3, sticky="w", pady=(2, 0))
+        r += 1
 
         ttk.Label(left, text="Hype-Wörter im Chat (mit Komma)", style="Panel.TLabel").grid(
             row=r, column=0, columnspan=3, sticky="w", pady=(8, 2))
@@ -376,6 +380,7 @@ class App:
             "min_gap": num(self.v_gap, 90), "skip_start": num(self.v_skip, 2), "w_chat": num(self.v_w, 65),
             "audio": bool(self.v_audio.get()), "fmt": self.v_fmt.get(), "vstyle": self.v_vstyle.get(),
             "quality": self.v_quality.get(), "bestof": bool(self.v_bestof.get()),
+            "nomenu": bool(self.v_nomenu.get()),
             "keywords": self.t_kw.get("1.0", "end").strip(), "outdir": self.v_out.get().strip() or DEFAULTS["outdir"],
             "auto": bool(self.v_auto.get()), "autostart": bool(self.v_autostart.get()),
             "autoupdate": bool(self.v_autoupdate.get()), "tray": bool(self.v_tray.get()),
@@ -686,18 +691,51 @@ class App:
         if not msgs and not loud:
             raise RuntimeError("Keine Daten zum Analysieren (weder Chat noch Audio).")
         self.log("🧠 Suche die besten Stellen …")
+        want = st["count"]
         hl, curve = core.find_highlights(
-            msgs, loud, length, count=st["count"], pre=st["pre"], post=st["post"], min_gap=st["min_gap"],
+            msgs, loud, length, count=want * 3 if st.get("nomenu", True) else want, pre=st["pre"], post=st["post"], min_gap=st["min_gap"],
             skip_start=st["skip_start"] * 60, w_chat=st["w_chat"] / 100, keywords=st["keywords"],
             raids=info.get("raids"), clip_reqs=info.get("clips"), log=self.log)
         n_learn = len(core.load_learning()["examples"])
         if n_learn:
             self.log(f"🧠 Nutze {n_learn} Bewertungen von dir, um nach deinem Geschmack zu sortieren.")
+        if hl and st.get("nomenu", True):
+            hl = self._filter_menus(src, hl, want, os.path.join(work, "bildcheck"))
+        hl = hl[:want]
         if not hl:
             raise RuntimeError("Keine auffälligen Stellen gefunden.")
         self.log(f"✔ {len(hl)} Highlights gefunden – Doppelklick zum Ansehen, dann clippen.")
         self.ui(lambda: self._show(src, hl, curve))
         return src, hl
+
+    def _filter_menus(self, src, hl, want, workdir):
+        """Schaut sich jeden Kandidaten kurz an und wirft Menüs/Einstellungen/Pause raus."""
+        self.log("🎮 Prüfe das Bild der Kandidaten (Menüs & Einstellungen raus) …")
+        keep, dropped = [], 0
+        for n, h in enumerate(hl, 1):
+            if len(keep) >= want:
+                break
+            self.runner.check()
+            try:
+                mean, static = core.measure_motion(src, h["start"], h["end"], workdir, self.runner)
+            except core.Cancelled:
+                raise
+            except Exception as e:
+                self.log(f"   ⚠ Bild-Check für {core.fmt_time(h['time'])} ging nicht ({str(e)[:80]}) – behalte die Stelle")
+                keep.append(h)
+                continue
+            if core.looks_like_menu(mean, static):
+                dropped += 1
+                self.log(f"   ✖ {core.fmt_time(h['time'])} verworfen – sieht nach Menü/Einstellungen aus "
+                         f"({int(static * 100)} % Standbild)")
+            else:
+                h["motion"] = round(mean, 1)
+                keep.append(h)
+        if dropped:
+            self.log(f"   → {dropped} Menü-Stelle(n) aussortiert und durch die nächstbesten ersetzt.")
+        else:
+            self.log("   ✔ Alles Gameplay, nichts aussortiert.")
+        return keep
 
     def _show(self, src, hl, curve, autosave=True):
         self.meta, self.highlights, self.curve = src, hl, curve

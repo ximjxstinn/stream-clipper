@@ -677,6 +677,51 @@ def find_highlights(msgs=None, loudness=None, duration=None, *, count=10, pre=18
     return highlights, curve
 
 
+# --------------------------------------------------------------------------- #
+#  Bild-Check: Menüs / Einstellungen / Pause erkennen (kaum Bewegung im Bild)
+# --------------------------------------------------------------------------- #
+def measure_motion(src, start, end, workdir, runner):
+    """Gibt (durchschnittliche Bewegung, Anteil fast stehender Bilder) für den Bereich zurück."""
+    dur = max(2.0, end - start)
+    os.makedirs(workdir, exist_ok=True)
+    if src["kind"] == "vod":
+        seg = os.path.join(workdir, f"motion_{int(start)}_{int(end)}.mp4")
+        if not os.path.isfile(seg):
+            runner.run([tool("yt-dlp"), "--newline", "--no-part", "-f", "worst[vcodec!=none]/worst",
+                        "--download-sections", f"*{start:.1f}-{end:.1f}",
+                        "--ffmpeg-location", os.path.dirname(tool("ffmpeg")),
+                        "-o", seg, vod_url(src["id"])], quiet=True)
+        inp = ["-i", seg]
+    else:
+        inp = ["-ss", f"{start:.2f}", "-t", f"{dur:.2f}", "-i", src["path"]]
+    out = f"motion_{int(start)}.txt"
+    runner.run([tool("ffmpeg"), "-hide_banner", "-loglevel", "error", "-y", *inp, "-an",
+                "-vf", "fps=2,scale=160:90,format=gray,tblend=all_mode=difference,signalstats,"
+                       f"metadata=print:key=lavfi.signalstats.YAVG:file={out}",
+                "-f", "null", "-"], cwd=workdir, quiet=True)
+    vals = []
+    with open(os.path.join(workdir, out), encoding="utf-8", errors="replace") as f:
+        for line in f:
+            if "YAVG=" in line:
+                try:
+                    vals.append(float(line.split("=", 1)[1]))
+                except ValueError:
+                    pass
+    if not vals:
+        return None, None
+    vals = vals[1:] or vals  # erstes Differenzbild ist oft verfälscht
+    mean = sum(vals) / len(vals)
+    static = sum(1 for v in vals if v < 1.0) / len(vals)
+    return mean, static
+
+
+def looks_like_menu(mean, static):
+    """Spiel = ganzes Bild bewegt sich. Menü/Einstellungen/Pause/BRB = fast alles steht still."""
+    if mean is None:
+        return False
+    return static >= 0.6 or mean < 2.0
+
+
 def _top_messages(msgs, n=4):
     counts = {}
     for m in msgs:

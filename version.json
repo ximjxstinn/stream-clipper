@@ -1,6 +1,6 @@
 {
-  "version": "2.3",
-  "notes": "Neu: Läuft beim Schließen/Minimieren unten rechts im Infobereich weiter + Benachrichtigungen",
+  "version": "2.4",
+  "notes": "Neu: Clips aus Menüs/Einstellungen/Pause werden per Bildanalyse aussortiert",
   "files": [
     "StreamClipper.pyw",
     "clipper_core.py",
