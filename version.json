@@ -1,6 +1,6 @@
 {
-  "version": "2.4",
-  "notes": "Neu: Clips aus Menüs/Einstellungen/Pause werden per Bildanalyse aussortiert",
+  "version": "2.5",
+  "notes": "Fix: Fenster kommt aus dem Infobereich wieder maximiert zurück, passt sich an kleine Fenster an",
   "files": [
     "StreamClipper.pyw",
     "clipper_core.py",

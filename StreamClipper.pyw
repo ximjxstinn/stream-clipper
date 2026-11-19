@@ -23,7 +23,7 @@ except ImportError:  # Update von 2.1: alter Updater kannte uploader.py noch nic
     except Exception:
         uploader = None
 
-VERSION = "2.4"
+VERSION = "2.5"
 import sys
 SETTINGS_FILE = os.path.join(core.APP_DIR, "settings.json")
 SESSION_DIR = os.path.join(core.APP_DIR, "gespeichert")
@@ -46,7 +46,7 @@ DEFAULTS = {
     "w_chat": 65, "audio": True, "fmt": FORMATS[2], "vstyle": "Blur-Hintergrund", "quality": "1080p",
     "bestof": False, "nomenu": True, "keywords": core.DEFAULT_KEYWORDS,
     "outdir": os.path.join(os.path.expanduser("~"), "Videos", "Stream Clips"),
-    "auto": False, "seen": [], "autostart": False, "autoupdate": True, "last_session": "", "tray": True, "tray_hint_shown": False,
+    "auto": False, "seen": [], "autostart": False, "autoupdate": True, "last_session": "", "tray": True, "tray_hint_shown": False, "win_zoomed": True, "win_geo": "",
 }
 
 
@@ -74,8 +74,17 @@ class App:
         self.auto_job = None
 
         root.title(f"xImJxstinn Stream Clipper v{VERSION}")
-        root.geometry("1180x800")
-        root.minsize(980, 680)
+        sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
+        geo = self.s.get("win_geo") or f"{min(1500, sw - 60)}x{min(960, sh - 90)}+20+20"
+        root.geometry(geo)
+        root.minsize(min(900, sw - 40), min(600, sh - 80))
+        self._last_state = "zoomed" if self.s.get("win_zoomed", True) else "normal"
+        if self._last_state == "zoomed":
+            try:
+                root.state("zoomed")
+            except tk.TclError:
+                pass
+        root.bind("<Configure>", self._on_configure, add="+")
         root.configure(bg=BG)
         ico = os.path.join(core.APP_DIR, "icon.ico")
         if os.path.isfile(ico):
@@ -141,8 +150,39 @@ class App:
 
         body = ttk.Frame(self.root, padding=(16, 6))
         body.pack(fill="both", expand=True)
-        left = ttk.Frame(body, style="Panel.TFrame", padding=14)
-        left.pack(side="left", fill="y")
+        # Linke Spalte scrollbar machen (für kleine Bildschirme / nicht maximiert)
+        lwrap = ttk.Frame(body, style="Panel.TFrame")
+        lwrap.pack(side="left", fill="y")
+        lcan = tk.Canvas(lwrap, bg=PANEL, highlightthickness=0, width=420)
+        lsb = ttk.Scrollbar(lwrap, orient="vertical", command=lcan.yview)
+        lcan.configure(yscrollcommand=lsb.set)
+        lcan.pack(side="left", fill="y")
+        left = ttk.Frame(lcan, style="Panel.TFrame", padding=14)
+        lcan.create_window((0, 0), window=left, anchor="nw")
+
+        def fit_left(_=None):
+            lcan.configure(scrollregion=(0, 0, left.winfo_reqwidth(), left.winfo_reqheight()),
+                           width=left.winfo_reqwidth())
+            if left.winfo_reqheight() > lcan.winfo_height() + 2:
+                if not lsb.winfo_ismapped():
+                    lsb.pack(side="left", fill="y")
+            elif lsb.winfo_ismapped():
+                lsb.pack_forget()
+                lcan.yview_moveto(0)
+        left.bind("<Configure>", fit_left)
+        lcan.bind("<Configure>", fit_left)
+
+        def wheel(e):
+            if not lsb.winfo_ismapped():
+                return
+            w = self.root.winfo_containing(e.x_root, e.y_root)
+            while w is not None and w is not lcan:
+                if isinstance(w, (tk.Text, ttk.Combobox, ttk.Spinbox)):
+                    return  # diese Felder scrollen selbst
+                w = w.master
+            if w is lcan:
+                lcan.yview_scroll(int(-e.delta / 120) or (-1 if e.delta > 0 else 1), "units")
+        self.root.bind_all("<MouseWheel>", wheel, add="+")
         right = ttk.Frame(body)
         right.pack(side="left", fill="both", expand=True, padx=(12, 0))
 
@@ -278,8 +318,20 @@ class App:
         left.columnconfigure(1, weight=1)
 
         # ---- Rechts: Aktionen ----
-        act = ttk.Frame(right)
-        act.pack(fill="x")
+        topbar = ttk.Frame(right)
+        topbar.pack(fill="x")
+        act = ttk.Frame(topbar)
+        act.grid(row=0, column=0, sticky="w")
+        act2 = ttk.Frame(topbar)
+        topbar.columnconfigure(1, weight=1)
+
+        def place_act2(_=None):
+            need = act.winfo_reqwidth() + act2.winfo_reqwidth() + 20
+            if topbar.winfo_width() < need:
+                act2.grid(row=1, column=0, columnspan=2, sticky="w", pady=(6, 0))
+            else:
+                act2.grid(row=0, column=1, sticky="e", pady=0)
+        topbar.bind("<Configure>", place_act2)
         self.b_an = ttk.Button(act, text="🔍 1. Analysieren", style="Accent.TButton", command=self.analyze)
         self.b_an.pack(side="left")
         self.b_clip = ttk.Button(act, text="✂ 2. Ausgewählte clippen", command=lambda: self.clip(False))
@@ -292,12 +344,12 @@ class App:
         self.b_up.pack(side="left")
         self.b_cancel = ttk.Button(act, text="Abbrechen", command=self.cancel, state="disabled")
         self.b_cancel.pack(side="left", padx=6)
-        ttk.Button(act, text="📁 Ordner", command=self._open_out).pack(side="right")
-        ttk.Button(act, text="📂 Laden", command=self.load_dialog).pack(side="right", padx=(0, 4))
-        ttk.Button(act, text="💾 Speichern", command=self.save_dialog).pack(side="right", padx=(0, 4))
-        ttk.Button(act, text="👎", width=4, command=lambda: self.rate(False)).pack(side="right", padx=(0, 10))
-        ttk.Button(act, text="👍", width=4, command=lambda: self.rate(True)).pack(side="right", padx=4)
-        ttk.Label(act, text="Bewerten:", foreground=MUTED).pack(side="right")
+        ttk.Label(act2, text="Bewerten:", foreground=MUTED).pack(side="left")
+        ttk.Button(act2, text="👍", width=4, command=lambda: self.rate(True)).pack(side="left", padx=4)
+        ttk.Button(act2, text="👎", width=4, command=lambda: self.rate(False)).pack(side="left", padx=(0, 10))
+        ttk.Button(act2, text="💾 Speichern", command=self.save_dialog).pack(side="left", padx=(0, 4))
+        ttk.Button(act2, text="📂 Laden", command=self.load_dialog).pack(side="left", padx=(0, 4))
+        ttk.Button(act2, text="📁 Ordner", command=self._open_out).pack(side="left")
 
         # ---- Hype-Kurve ----
         self.canvas = tk.Canvas(right, height=150, bg=PANEL, highlightthickness=0)
@@ -509,7 +561,12 @@ class App:
         )
         self.tray = pystray.Icon("StreamClipper", img, f"Stream Clipper v{VERSION}", menu)
         self.ui(lambda: self.root.iconphoto(True, self._tk_icon()) if self._tk_icon() else None)
-        self.tray.run()
+        self.log("✔ Infobereich bereit – Schließen/Minimieren schickt die App nach unten rechts.")
+        try:
+            self.tray.run()
+        except Exception as e:
+            self.tray = None
+            self.log(f"⚠ Infobereich-Icon ist abgestürzt ({e}) – App schließt dann normal.")
 
     def _tk_icon(self):
         try:
@@ -533,11 +590,24 @@ class App:
 
     def show_window(self):
         self.root.deiconify()
-        self.root.state("normal")
+        try:
+            self.root.state(self._last_state)  # war es maximiert, kommt es maximiert zurück
+        except tk.TclError:
+            self.root.state("normal")
         self.root.lift()
         self.root.attributes("-topmost", True)
         self.root.after(200, lambda: self.root.attributes("-topmost", False))
         self.root.focus_force()
+
+    def _on_configure(self, event):
+        if event.widget is not self.root:
+            return
+        st = self.root.state()
+        if st in ("normal", "zoomed"):
+            self._last_state = st
+            self.s["win_zoomed"] = st == "zoomed"
+            if st == "normal":
+                self.s["win_geo"] = self.root.geometry()
 
     def _on_unmap(self, event):
         if event.widget is self.root and self._use_tray():
@@ -548,6 +618,10 @@ class App:
             self.settings()
             self.save_session()
             self.hide_to_tray()
+        elif self.v_tray.get() and (self.busy or self.v_auto.get()):
+            # Infobereich noch nicht bereit, aber es läuft etwas → nicht beenden, nur minimieren
+            self.root.iconify()
+            self.log("ℹ Infobereich noch nicht bereit – App wurde in die Taskleiste minimiert.")
         else:
             self._quit()
 
