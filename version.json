@@ -1,6 +1,6 @@
 {
-  "version": "2.6",
-  "notes": "Neu: Automatischer Clip-Check + Freigabe vor dem Hochladen",
+  "version": "2.7",
+  "notes": "Fix: TikTok schaltet bei ungeprüfter App automatisch auf Entwurf-Upload um",
   "files": [
     "StreamClipper.pyw",
     "clipper_core.py",

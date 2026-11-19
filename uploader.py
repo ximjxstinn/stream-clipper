@@ -323,9 +323,23 @@ def _tt_access(conf):
     return tok["access_token"]
 
 
+class TikTokError(UploadError):
+    def __init__(self, code, msg):
+        super().__init__(msg)
+        self.code = code
+
+
 def _tt_api(conf, endpoint, body):
-    data, _ = _req("https://open.tiktokapis.com" + endpoint, body,
-                   headers={"Authorization": "Bearer " + _tt_access(conf)})
+    try:
+        data, _ = _req("https://open.tiktokapis.com" + endpoint, body,
+                       headers={"Authorization": "Bearer " + _tt_access(conf)})
+    except UploadError as e:
+        # TikTok schickt Fehler als JSON im HTTP-Fehler-Body → auswerten
+        txt = str(e)
+        try:
+            data = json.loads(txt[txt.index("{"):])
+        except Exception:
+            raise e
     err = data.get("error") or {}
     if err.get("code") not in (None, "", "ok"):
         hint = {
@@ -335,7 +349,7 @@ def _tt_api(conf, endpoint, body):
             "spam_risk_too_many_posts": " → TikTok-Tageslimit erreicht, morgen geht's weiter.",
             "scope_not_authorized": " → Bitte TikTok in den Upload-Einstellungen neu verbinden.",
         }.get(err.get("code"), "")
-        raise UploadError(f"TikTok: {err.get('code')} – {err.get('message', '')}{hint}")
+        raise TikTokError(err.get("code"), f"TikTok: {err.get('code')} – {err.get('message', '')}{hint}")
     return data.get("data") or {}
 
 
@@ -358,16 +372,34 @@ def tt_upload(conf, path, caption, log=print, cancel=None):
     size = os.path.getsize(path)
     chunk, count = _tt_chunks(size)
     source = {"source": "FILE_UPLOAD", "video_size": size, "chunk_size": chunk, "total_chunk_count": count}
+    data = None
     if conf.get("tt_mode") == "direct":
         info = tt_creator(conf)
         opts = info.get("privacy_level_options") or ["SELF_ONLY"]
         privacy = "PUBLIC_TO_EVERYONE" if "PUBLIC_TO_EVERYONE" in opts else opts[0]
-        data = _tt_api(conf, "/v2/post/publish/video/init/", {
-            "post_info": {"title": caption[:2200], "privacy_level": privacy, "disable_duet": False,
-                          "disable_comment": False, "disable_stitch": False, "video_cover_timestamp_ms": 1000},
-            "source_info": source})
-    else:
-        data = _tt_api(conf, "/v2/post/publish/inbox/video/init/", {"source_info": source})
+        try:
+            data = _tt_api(conf, "/v2/post/publish/video/init/", {
+                "post_info": {"title": caption[:2200], "privacy_level": privacy, "disable_duet": False,
+                              "disable_comment": False, "disable_stitch": False, "video_cover_timestamp_ms": 1000},
+                "source_info": source})
+        except TikTokError as e:
+            if e.code != "unaudited_client_can_only_post_to_private_accounts":
+                raise
+            # Ungeprüfte App + öffentliches Konto → automatisch auf Entwurf umstellen
+            log("      ℹ Direkt posten geht erst nach der TikTok-Prüfung – schicke den Clip als Entwurf "
+                "in deine TikTok-App (Modus dauerhaft auf 'Entwurf' umgestellt).")
+            conf["tt_mode"] = "draft"
+            save_conf(conf)
+    if data is None:
+        try:
+            data = _tt_api(conf, "/v2/post/publish/inbox/video/init/", {"source_info": source})
+        except TikTokError as e:
+            if e.code == "unaudited_client_can_only_post_to_private_accounts":
+                raise UploadError(
+                    "TikTok blockt auch Entwürfe von ungeprüften Apps bei öffentlichen Konten. Lösung: "
+                    "entweder dein TikTok-Konto kurz auf 'Privat' stellen, oder die App bei TikTok zur "
+                    "Prüfung einreichen (developers.tiktok.com → deine App → Submit for review).")
+            raise
     url, pid = data.get("upload_url"), data.get("publish_id")
     if not url:
         raise UploadError("TikTok hat keine Upload-Adresse geliefert.")
