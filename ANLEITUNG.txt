@@ -1,0 +1,61 @@
+xImJxstinn STREAM CLIPPER
+=========================
+
+STARTEN
+  Doppelklick auf start.bat
+  (Fehlt Python, wird es einmalig automatisch installiert.
+   Beim ersten Analysieren lädt die App selbst yt-dlp, ffmpeg und TwitchDownloaderCLI in den Ordner "tools".)
+
+SO GEHT'S
+  1. "VODs laden" -> dein letzter Stream wird automatisch ausgewählt
+     (oder einen VOD-Link einfügen bzw. eine eigene OBS-Aufnahme wählen)
+  2. "Analysieren" -> die App lädt Chat + Ton und sucht die Hype-Momente
+  3. In der Liste per Doppelklick reinschauen (öffnet die Stelle auf Twitch)
+  4. "Ausgewählte clippen" oder "Alle clippen"
+  Oder einfach "Alles automatisch" = analysieren + alle Top-Clips schneiden.
+
+NEU IN 2.1
+  - Speichern: Jede Analyse wird automatisch gespeichert (inkl. 👍/👎 und was schon geclippt ist)
+    und beim nächsten Start wieder geladen. Mit "💾 Speichern" / "📂 Laden" kannst du
+    auch selbst Analysen sichern und alte wieder öffnen (Ordner "gespeichert").
+  - Auto-Updates: Beim Start (und alle 6 Std.) schaut die App auf GitHub nach einer neuen
+    Version, lädt sie, prüft sie und startet neu. Alte Dateien landen im Ordner "backup".
+    Abschaltbar über den Haken "Updates automatisch laden & installieren".
+
+NEU IN 2.0
+  - Bots, Befehle, Begrüßungen ("hi", "moin", "!lurk"), Sub-/Follow-Meldungen und Raids
+    werden aus dem Chat gefiltert -> keine Fake-Hype-Stellen mehr
+  - Lautstärke misst jetzt nur deine Stimme (Sprach-Frequenzen), nicht Explosionen/Schüsse,
+    und zählt nur, wenn es mind. 2 Sekunden am Stück laut ist
+  - Wenn jemand (auch du) "clip" oder "!clip" schreibt, ist das ein Top-Signal
+  - Bei ruhigem Chat wird automatisch mehr auf deine Stimme geachtet
+  - Der Clip startet beim echten Moment (nicht erst, wenn der Chat reagiert)
+    und wird länger, solange der Hype anhält
+  - Schwache Stellen werden weggelassen: lieber 4 gute als 10 langweilige Clips
+  - 👍/👎: Bewerte Clips in der Liste -> die App lernt deinen Geschmack
+  - "Mit Windows starten": läuft minimiert im Hintergrund und clippt jeden neuen Stream selbst
+
+WIE ERKENNT DIE APP GUTE STELLEN?
+  - Chat: plötzlich viel mehr Leute schreiben als sonst (im Vergleich zu den 5 Minuten drumherum)
+  - Hype-Wörter: KEKW, LUL, W, clip, ???, krass, digga ... (Liste ist in der App änderbar)
+  - Lautstärke: du wirst plötzlich laut (Schreien, Lachen, Rage)
+  Mit dem Regler stellst du ein, was wichtiger ist: Chat oder Lautstärke.
+
+AUSGABE
+  Standard: Videos\Stream Clips\<Datum>_<Streamtitel>\
+  - 01_..._hype100.mp4        = normaler Clip (16:9)
+  - 01_..._hype100_tiktok.mp4 = Hochkant 1080x1920 für TikTok/Shorts
+  - _BEST-OF.mp4              = alle Clips am Stück (wenn angehakt)
+  - highlights.txt            = alle Zeitstempel mit Twitch-Links
+
+AUTO-MODUS
+  Haken setzen und App offen lassen: alle 30 Minuten wird geschaut, ob ein neuer Stream
+  fertig ist. Wenn ja, wird er automatisch analysiert und geclippt.
+
+GUT ZU WISSEN
+  - Twitch muss "Vergangene Übertragungen speichern" aktiviert haben (Creator-Dashboard > Einstellungen > Stream).
+  - VODs werden von Twitch nach ein paar Tagen gelöscht – also zeitnah clippen.
+  - Abo-only-VODs gehen nicht.
+  - Bei eigenen Aufnahmen gibt es keinen Chat, da zählt nur die Lautstärke.
+  - Wenn Twitch etwas ändert und Downloads nicht mehr klappen: "Tools aktualisieren".
+  - Fehlerdetails stehen in fehler.log.

@@ -1,0 +1,9 @@
+settings.json
+lernen.json
+fehler.log
+cache/
+tools/
+gespeichert/
+backup/
+_update/
+__pycache__/
