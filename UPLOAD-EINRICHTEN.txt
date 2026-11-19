@@ -1,0 +1,54 @@
+UPLOAD ZU YOUTUBE & TIKTOK EINRICHTEN
+=====================================
+Einmalig ca. 15 Minuten. Deine Zugangsdaten bleiben nur auf deinem PC (Datei uploads.json).
+
+---------------------------------------------------------------
+YOUTUBE
+---------------------------------------------------------------
+1. https://console.cloud.google.com öffnen -> oben "Projekt auswählen" -> "Neues Projekt"
+   Name z. B. "Stream Clipper" -> Erstellen
+2. Links "APIs & Dienste" -> "Bibliothek" -> "YouTube Data API v3" suchen -> Aktivieren
+3. "APIs & Dienste" -> "OAuth-Zustimmungsbildschirm" (bzw. "Google Auth Platform")
+   - Nutzertyp: Extern, App-Name: Stream Clipper, deine E-Mail eintragen
+   - Unter "Zielgruppe"/"Testnutzer": deine Google-Mail (die vom YouTube-Kanal) hinzufügen
+   - WICHTIG: Danach "App veröffentlichen" / "In Produktion" klicken.
+     Sonst läuft die Anmeldung alle 7 Tage ab.
+4. "Clients" bzw. "Anmeldedaten" -> "Client erstellen" / "OAuth-Client-ID"
+   - Anwendungstyp: DESKTOP-APP -> Erstellen -> "JSON herunterladen"
+5. In der App: "Upload zu YouTube & TikTok einrichten" -> YouTube "Datei …" -> die JSON wählen
+   -> "Verbinden" -> im Browser anmelden.
+   Kommt "Google hat diese App nicht überprüft": auf "Erweitert" -> "Weiter zu Stream Clipper".
+   (Das ist deine eigene App, das ist okay.)
+
+GUT ZU WISSEN (YouTube):
+- Google stellt Videos aus neuen, nicht geprüften Apps IMMER auf "privat" – auch wenn
+  "Öffentlich" eingestellt ist – und sie lassen sich danach nicht öffentlich schalten.
+- Damit sie öffentlich werden: Prüfung beantragen (kostenlos):
+  https://support.google.com/youtube/contact/yt_api_form
+  Bis dahin am besten "Privat" einstellen, dann weißt du, woran du bist.
+- Shorts: Hochkant-Clips bis 3 Minuten werden automatisch zu Shorts (#Shorts wird angehängt).
+
+---------------------------------------------------------------
+TIKTOK
+---------------------------------------------------------------
+1. https://developers.tiktok.com -> mit deinem TikTok anmelden -> "Manage apps" -> "Connect an app"
+2. App anlegen (Name: Stream Clipper, Kategorie z. B. Entertainment, Plattform: Desktop)
+3. Unter "Products" hinzufügen:
+   - "Login Kit": bei Desktop als Redirect URI eintragen:   http://127.0.0.1:*/callback/
+   - "Content Posting API": "Direct Post" aktivieren (für später)
+4. Scopes: user.info.basic, video.upload, video.publish
+5. Solange die App nicht freigegeben ist: Oben auf "Sandbox" wechseln und unter
+   "Target Users" dein eigenes TikTok-Konto hinzufügen.
+6. Client Key + Client Secret kopieren -> in die App eintragen -> "Verbinden"
+
+MODI:
+- "Als Entwurf in die TikTok-App" (empfohlen): Das Video landet in deiner TikTok-App
+  (Benachrichtigung / Posteingang). Du öffnest es, kannst Sound/Text dazu machen und tippst
+  auf Posten. Klappt auch mit öffentlichem Konto ohne TikTok-Prüfung.
+- "Direkt posten": Geht sofort online – ABER nur, wenn TikTok deine App geprüft hat.
+  Ohne Prüfung blockt TikTok das bei öffentlichen Konten.
+  Prüfung: in deiner App auf developers.tiktok.com "Submit for review".
+  Achtung: TikTok lehnt reine Privat-Tools oft ab.
+
+TikTok erlaubt nur eine begrenzte Anzahl Uploads pro Tag – stell beim Auto-Upload
+lieber "beste 3" ein als 10.

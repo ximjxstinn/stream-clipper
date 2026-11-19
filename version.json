@@ -1,5 +1,5 @@
 {
-  "version": "2.1",
-  "notes": "Speichern & Laden von Analysen, automatische Updates",
-  "files": ["StreamClipper.pyw", "clipper_core.py", "updater.py", "start.bat", "ANLEITUNG.txt"]
+  "version": "2.2",
+  "notes": "Neu: Upload zu YouTube & TikTok (manuell oder automatisch nach dem Clippen)",
+  "files": ["StreamClipper.pyw", "clipper_core.py", "updater.py", "uploader.py", "start.bat", "ANLEITUNG.txt", "UPLOAD-EINRICHTEN.txt"]
 }

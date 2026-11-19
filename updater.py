@@ -9,7 +9,8 @@ import urllib.request
 
 REPO_RAW = "https://raw.githubusercontent.com/ximjxstinn/stream-clipper/main/"
 APP_DIR = os.path.dirname(os.path.abspath(sys.argv[0] if sys.argv and sys.argv[0] else __file__))
-SAFE_NAMES = {"StreamClipper.pyw", "clipper_core.py", "updater.py", "start.bat", "ANLEITUNG.txt", "icon.ico"}
+SAFE_NAMES = {"StreamClipper.pyw", "clipper_core.py", "updater.py", "uploader.py", "start.bat", "ANLEITUNG.txt",
+              "UPLOAD-EINRICHTEN.txt", "icon.ico"}
 
 
 def _get(url, timeout=20):

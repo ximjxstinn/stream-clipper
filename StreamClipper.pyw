@@ -13,7 +13,17 @@ from tkinter import ttk, filedialog, messagebox
 import clipper_core as core
 import updater
 
-VERSION = "2.1"
+try:
+    import uploader
+except ImportError:  # Update von 2.1: alter Updater kannte uploader.py noch nicht → selbst nachladen
+    try:
+        with open(os.path.join(core.APP_DIR, "uploader.py"), "wb") as _f:
+            _f.write(updater._get(updater.REPO_RAW + "uploader.py"))
+        import uploader
+    except Exception:
+        uploader = None
+
+VERSION = "2.2"
 import sys
 SETTINGS_FILE = os.path.join(core.APP_DIR, "settings.json")
 SESSION_DIR = os.path.join(core.APP_DIR, "gespeichert")
@@ -241,6 +251,9 @@ class App:
         ttk.Checkbutton(left, text="Updates automatisch laden & installieren", variable=self.v_autoupdate,
                         command=self.settings).grid(row=r, column=0, columnspan=3, sticky="w", pady=(2, 0))
         r += 1
+        ttk.Button(left, text="⬆ Upload zu YouTube & TikTok einrichten …", style="Accent.TButton",
+                   command=self.upload_settings).grid(row=r, column=0, columnspan=3, sticky="we", pady=(10, 0))
+        r += 1
         bf = ttk.Frame(left, style="Panel.TFrame")
         bf.grid(row=r, column=0, columnspan=3, sticky="we", pady=(10, 0))
         ttk.Button(bf, text="🔄 Nach Updates suchen", command=lambda: self.check_updates(False)).pack(
@@ -263,8 +276,10 @@ class App:
         self.b_all.pack(side="left")
         self.b_auto = ttk.Button(act, text="⚡ Alles automatisch", style="Accent.TButton", command=self.full_auto)
         self.b_auto.pack(side="left", padx=6)
+        self.b_up = ttk.Button(act, text="⬆ Hochladen", command=self.upload_selected)
+        self.b_up.pack(side="left")
         self.b_cancel = ttk.Button(act, text="Abbrechen", command=self.cancel, state="disabled")
-        self.b_cancel.pack(side="left")
+        self.b_cancel.pack(side="left", padx=6)
         ttk.Button(act, text="📁 Ordner", command=self._open_out).pack(side="right")
         ttk.Button(act, text="📂 Laden", command=self.load_dialog).pack(side="right", padx=(0, 4))
         ttk.Button(act, text="💾 Speichern", command=self.save_dialog).pack(side="right", padx=(0, 4))
@@ -392,7 +407,7 @@ class App:
 
     def _set_busy(self, busy):
         self.busy = busy
-        for b in (self.b_an, self.b_clip, self.b_all, self.b_auto, self.b_vods):
+        for b in (self.b_an, self.b_clip, self.b_all, self.b_auto, self.b_vods, self.b_up):
             b.configure(state="disabled" if busy else "normal")
         self.b_cancel.configure(state="normal" if busy else "disabled")
         if busy:
@@ -812,9 +827,11 @@ class App:
             else:
                 wide = core.cut_from_file(src["path"], h["start"], h["end"], base + ".mp4", self.runner)
             made_wide.append((h["start"], wide))
+            tall = None
             if want_tall:
                 self.log("   📱 TikTok-Version …")
-                core.make_vertical(wide, base + "_tiktok.mp4", vstyle, self.runner)
+                tall = core.make_vertical(wide, base + "_tiktok.mp4", vstyle, self.runner)
+            h["files"] = {"wide": wide if want_wide else None, "tall": tall, "vstyle": vstyle}
             link = f"{core.vod_url(src['id'])}?t={core.twitch_t(h['start'])}" if src["kind"] == "vod" else ""
             lines.append(f"#{i + 1}  {core.fmt_time(h['start'])}  Hype {h['score']}  {h['reason']}  {link}")
             h["clipped"] = True
@@ -831,7 +848,228 @@ class App:
         with open(os.path.join(folder, "highlights.txt"), "w", encoding="utf-8") as f:
             f.write("\n".join(lines) + "\n")
         self.log(f"✅ Fertig! {len(items)} Clips gespeichert in: {folder}")
+        if uploader:
+            conf = uploader.load_conf()
+            plats = [p for p, k in (("yt", "yt_auto"), ("tt", "tt_auto")) if conf.get(k)]
+            if plats:
+                best = sorted(items, key=lambda x: -x[1]["score"])[:max(1, int(conf.get("auto_max", 3)))]
+                self.log(f"⬆ Auto-Upload der besten {len(best)} Clips …")
+                self._upload_job(src, best, plats)
         return folder
+
+    # ----------------------------------------------------------------- Upload --
+    def upload_selected(self):
+        if not uploader:
+            messagebox.showerror("Upload", "uploader.py fehlt – bitte 'Nach Updates suchen'.")
+            return
+        sel = [int(i) for i in self.tree.selection()]
+        if not sel:
+            messagebox.showinfo("Hochladen", "Wähl in der Liste die Clips aus, die hochgeladen werden sollen.")
+            return
+        missing = [i + 1 for i in sel if not self.highlights[i].get("files")]
+        if missing:
+            messagebox.showinfo("Erst clippen", f"Clip(s) #{', #'.join(map(str, missing))} sind noch nicht "
+                                                "geschnitten. Klick zuerst auf 'Ausgewählte clippen'.")
+            return
+        conf = uploader.load_conf()
+        plats = []
+        if conf.get("yt_token"):
+            plats.append("yt")
+        if conf.get("tt_token"):
+            plats.append("tt")
+        if not plats:
+            self.upload_settings()
+            return
+        names = " und ".join({"yt": "YouTube", "tt": "TikTok"}[p] for p in plats)
+        if not messagebox.askyesno("Hochladen", f"{len(sel)} Clip(s) zu {names} hochladen?"):
+            return
+        self._work(self._upload_job, self.meta, [(i, self.highlights[i]) for i in sel], plats)
+
+    def _upload_job(self, src, items, plats):
+        conf = uploader.load_conf()
+        cancel = lambda: self.runner.cancel_event.is_set()
+        done = 0
+        for i, h in items:
+            self.runner.check()
+            files = h.get("files") or {}
+            up = h.setdefault("uploaded", {})
+            for plat in plats:
+                if up.get(plat):
+                    self.log(f"   #{i + 1} ist schon auf {'YouTube' if plat == 'yt' else 'TikTok'} – übersprungen")
+                    continue
+                wide_mode = plat == "yt" and conf.get("yt_what") == "wide"
+                path = files.get("wide") if wide_mode else files.get("tall")
+                if not path or not os.path.isfile(path):
+                    src_wide = files.get("wide")
+                    if wide_mode and files.get("tall") and os.path.isfile(files["tall"]):
+                        path = files["tall"]
+                    elif src_wide and os.path.isfile(src_wide):
+                        self.log(f"   📱 Erstelle Hochkant-Version für #{i + 1} …")
+                        path = core.make_vertical(src_wide, os.path.splitext(src_wide)[0] + "_tiktok.mp4",
+                                                  files.get("vstyle", "blur"), self.runner)
+                        files["tall"] = path
+                    else:
+                        self.log(f"⚠ Datei für Clip #{i + 1} nicht gefunden – übersprungen")
+                        continue
+                title, desc, tags = uploader.build_text(conf, src.get("title"), i + 1, h.get("reason", ""),
+                                                        short=not wide_mode)
+                try:
+                    if plat == "yt":
+                        self.log(f"▶ YouTube: lade #{i + 1} hoch – „{title}“")
+                        vid, privacy = uploader.yt_upload(conf, path, title, desc, tags, self.log, cancel)
+                        up["yt"] = vid
+                        note = ""
+                        if privacy == "private" and conf.get("yt_privacy") != "private":
+                            note = " (noch privat – Google schaltet öffentlich erst nach der API-Prüfung frei)"
+                        self.log(f"   ✅ https://youtu.be/{vid}{note}")
+                    else:
+                        self.log(f"♪ TikTok: lade #{i + 1} hoch …")
+                        pid, status = uploader.tt_upload(conf, path, f"{title} {tags}", self.log, cancel)
+                        up["tt"] = pid
+                        self.log("   ✅ " + ("In deiner TikTok-App als Entwurf – Benachrichtigung öffnen und posten!"
+                                           if status == "SEND_TO_USER_INBOX" else f"Gepostet ({status})"))
+                    done += 1
+                except uploader.UploadError as e:
+                    if "Abgebrochen" in str(e):
+                        raise core.Cancelled()
+                    self.log(f"   ❌ {e}")
+                self.ui(self.save_session)
+        self.log(f"⬆ Upload fertig – {done} Upload(s) erfolgreich.")
+
+    def upload_settings(self):
+        if not uploader:
+            messagebox.showerror("Upload", "uploader.py fehlt – bitte 'Nach Updates suchen'.")
+            return
+        conf = uploader.load_conf()
+        win = tk.Toplevel(self.root)
+        win.title("Upload zu YouTube & TikTok")
+        win.configure(bg=BG)
+        win.geometry("640x760")
+        win.transient(self.root)
+        f = ttk.Frame(win, style="Panel.TFrame", padding=16)
+        f.pack(fill="both", expand=True, padx=12, pady=12)
+        f.columnconfigure(1, weight=1)
+        r = 0
+
+        def sec(text):
+            nonlocal r
+            ttk.Label(f, text=text, style="Sec.TLabel").grid(row=r, column=0, columnspan=3, sticky="w", pady=(12, 4))
+            r += 1
+
+        def row(label, widget, btn=None):
+            nonlocal r
+            ttk.Label(f, text=label, style="Panel.TLabel").grid(row=r, column=0, sticky="w", pady=3, padx=(0, 8))
+            widget.grid(row=r, column=1, sticky="we", pady=3)
+            if btn:
+                btn.grid(row=r, column=2, sticky="e", padx=(6, 0))
+            r += 1
+
+        # ---- YouTube ----
+        sec("▶ YouTube")
+        yt_file = tk.StringVar(value=os.path.basename(conf.get("yt_client_file", "")) or "keine Datei")
+        yt_status = tk.StringVar(value="✅ verbunden" if conf.get("yt_token") else "nicht verbunden")
+
+        def pick_yt():
+            p = filedialog.askopenfilename(parent=win, title="client_secret….json von Google wählen",
+                                           filetypes=[("JSON", "*.json")])
+            if p:
+                try:
+                    uploader.yt_load_client_file(conf, p)
+                    yt_file.set(os.path.basename(p))
+                except Exception as e:
+                    messagebox.showerror("YouTube", str(e), parent=win)
+
+        def connect(fn, var):
+            store()
+            var.set("⏳ Browser geöffnet – bitte anmelden …")
+
+            def job():
+                try:
+                    name = fn(conf, self.log)
+                    self.ui(lambda: var.set(f"✅ {name}"))
+                except Exception as e:
+                    self.log(f"❌ {e}")
+                    self.ui(lambda: var.set("❌ fehlgeschlagen – siehe Log"))
+            threading.Thread(target=job, daemon=True).start()
+
+        row("OAuth-Datei", ttk.Label(f, textvariable=yt_file, style="Muted.TLabel"),
+            ttk.Button(f, text="Datei …", command=pick_yt))
+        row("Status", ttk.Label(f, textvariable=yt_status, style="Muted.TLabel"),
+            ttk.Button(f, text="Verbinden", command=lambda: connect(uploader.yt_connect, yt_status)))
+        privs = {"Öffentlich": "public", "Nicht gelistet": "unlisted", "Privat": "private"}
+        yt_priv = tk.StringVar(value=next(k for k, v in privs.items() if v == conf.get("yt_privacy", "public")))
+        row("Sichtbarkeit", ttk.Combobox(f, textvariable=yt_priv, values=list(privs), state="readonly"))
+        whats = {"Shorts (Hochkant 9:16)": "shorts", "Normale Videos (16:9)": "wide"}
+        yt_what = tk.StringVar(value=next(k for k, v in whats.items() if v == conf.get("yt_what", "shorts")))
+        row("Hochladen als", ttk.Combobox(f, textvariable=yt_what, values=list(whats), state="readonly"))
+        yt_auto = tk.BooleanVar(value=conf.get("yt_auto", False))
+        ttk.Checkbutton(f, text="Nach dem Clippen automatisch auf YouTube hochladen", variable=yt_auto).grid(
+            row=r, column=0, columnspan=3, sticky="w"); r += 1
+
+        # ---- TikTok ----
+        sec("♪ TikTok")
+        tt_key = tk.StringVar(value=conf.get("tt_client_key", ""))
+        tt_sec = tk.StringVar(value=conf.get("tt_client_secret", ""))
+        tt_status = tk.StringVar(value="✅ verbunden" if conf.get("tt_token") else "nicht verbunden")
+        row("Client Key", ttk.Entry(f, textvariable=tt_key))
+        row("Client Secret", ttk.Entry(f, textvariable=tt_sec, show="•"))
+        row("Status", ttk.Label(f, textvariable=tt_status, style="Muted.TLabel"),
+            ttk.Button(f, text="Verbinden", command=lambda: connect(uploader.tt_connect, tt_status)))
+        modes = {"Als Entwurf in die TikTok-App (klappt sofort)": "draft",
+                 "Direkt posten (erst nach TikTok-Prüfung öffentlich)": "direct"}
+        tt_mode = tk.StringVar(value=next(k for k, v in modes.items() if v == conf.get("tt_mode", "draft")))
+        row("Modus", ttk.Combobox(f, textvariable=tt_mode, values=list(modes), state="readonly"))
+        tt_auto = tk.BooleanVar(value=conf.get("tt_auto", False))
+        ttk.Checkbutton(f, text="Nach dem Clippen automatisch zu TikTok hochladen", variable=tt_auto).grid(
+            row=r, column=0, columnspan=3, sticky="w"); r += 1
+
+        # ---- Texte ----
+        sec("✏ Titel & Beschreibung")
+        title = tk.StringVar(value=conf.get("title"))
+        row("Titel", ttk.Entry(f, textvariable=title))
+        ttk.Label(f, text="{stream} = Streamtitel · {nr} = Platz in der Highlight-Liste", style="Muted.TLabel").grid(
+            row=r, column=1, sticky="w"); r += 1
+        desc = tk.Text(f, height=4, bg=FIELD, fg=TEXT, insertbackground=TEXT, relief="flat", font=("Segoe UI", 9))
+        desc.insert("1.0", conf.get("description", ""))
+        row("Beschreibung", desc)
+        tags = tk.StringVar(value=conf.get("hashtags"))
+        row("Hashtags", ttk.Entry(f, textvariable=tags))
+        amax = tk.IntVar(value=conf.get("auto_max", 3))
+        row("Auto-Upload: beste", ttk.Spinbox(f, from_=1, to=15, textvariable=amax, width=5))
+
+        def store():
+            conf.update({"yt_privacy": privs[yt_priv.get()], "yt_what": whats[yt_what.get()],
+                         "yt_auto": bool(yt_auto.get()), "tt_client_key": tt_key.get().strip(),
+                         "tt_client_secret": tt_sec.get().strip(), "tt_mode": modes[tt_mode.get()],
+                         "tt_auto": bool(tt_auto.get()), "title": title.get(),
+                         "description": desc.get("1.0", "end").strip(), "hashtags": tags.get()})
+            try:
+                conf["auto_max"] = int(amax.get())
+            except Exception:
+                pass
+            uploader.save_conf(conf)
+
+        bf = ttk.Frame(f, style="Panel.TFrame")
+        bf.grid(row=r, column=0, columnspan=3, sticky="we", pady=(16, 0))
+
+        def open_help():
+            p = os.path.join(core.APP_DIR, "UPLOAD-EINRICHTEN.txt")
+            if not os.path.isfile(p):
+                try:
+                    with open(p, "wb") as hf:
+                        hf.write(updater._get(updater.REPO_RAW + "UPLOAD-EINRICHTEN.txt"))
+                except Exception:
+                    webbrowser.open("https://github.com/ximjxstinn/stream-clipper/blob/main/UPLOAD-EINRICHTEN.txt")
+                    return
+            try:
+                os.startfile(p)
+            except Exception:
+                webbrowser.open(p)
+
+        ttk.Button(bf, text="❓ So richtest du das ein", command=open_help).pack(side="left")
+        ttk.Button(bf, text="Speichern", style="Accent.TButton",
+                   command=lambda: (store(), self.log("✔ Upload-Einstellungen gespeichert"), win.destroy())).pack(
+            side="right")
 
     def full_auto(self):
         src = self._source()

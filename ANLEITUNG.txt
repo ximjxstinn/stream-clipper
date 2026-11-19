@@ -14,6 +14,12 @@ SO GEHT'S
   4. "Ausgewählte clippen" oder "Alle clippen"
   Oder einfach "Alles automatisch" = analysieren + alle Top-Clips schneiden.
 
+NEU IN 2.2
+  - Upload zu YouTube (Shorts oder normale Videos) und TikTok – per Knopf "⬆ Hochladen"
+    oder automatisch nach dem Clippen (die besten X Clips).
+  - Einrichten: Knopf "Upload zu YouTube & TikTok einrichten", Schritt für Schritt in
+    UPLOAD-EINRICHTEN.txt. Schon hochgeladene Clips werden nicht doppelt hochgeladen.
+
 NEU IN 2.1
   - Speichern: Jede Analyse wird automatisch gespeichert (inkl. 👍/👎 und was schon geclippt ist)
     und beim nächsten Start wieder geladen. Mit "💾 Speichern" / "📂 Laden" kannst du
