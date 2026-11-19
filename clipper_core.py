@@ -722,6 +722,65 @@ def looks_like_menu(mean, static):
     return static >= 0.6 or mean < 2.0
 
 
+# --------------------------------------------------------------------------- #
+#  Qualitäts-Check eines fertigen Clips (vor dem Hochladen)
+# --------------------------------------------------------------------------- #
+def check_clip(path, expected_dur, runner, tall=False):
+    """Prüft einen geschnittenen Clip. Gibt (ok, probleme, info) zurück."""
+    problems = []
+    info = {}
+    if not path or not os.path.isfile(path):
+        return False, ["Datei fehlt"], info
+    # Streams + Länge + Auflösung
+    out = []
+    try:
+        runner.run([tool("ffprobe"), "-v", "error", "-show_entries",
+                    "stream=codec_type,width,height:format=duration", "-of", "json", path], on_line=out.append)
+        meta = json.loads("\n".join(out))
+    except Exception:
+        return False, ["Datei ist kaputt (lässt sich nicht lesen)"], info
+    streams = meta.get("streams", [])
+    v = next((x for x in streams if x.get("codec_type") == "video"), None)
+    a = next((x for x in streams if x.get("codec_type") == "audio"), None)
+    dur = float((meta.get("format") or {}).get("duration") or 0)
+    info["dauer"] = round(dur, 1)
+    if not v:
+        return False, ["Kein Bild im Clip"], info
+    if not a:
+        problems.append("Kein Ton")
+    h, w = int(v.get("height") or 0), int(v.get("width") or 0)
+    info["aufloesung"] = f"{w}x{h}"
+    if (tall and h < 1280) or (not tall and h < 700):
+        problems.append(f"niedrige Auflösung ({w}x{h})")
+    if dur < 5:
+        problems.append(f"zu kurz ({dur:.0f} s)")
+    elif expected_dur and abs(dur - expected_dur) > max(4.0, expected_dur * 0.25):
+        problems.append(f"Länge stimmt nicht ({dur:.0f} s statt {expected_dur:.0f} s)")
+    # Schwarzbild, Stille, Standbild in einem Durchgang
+    lines = []
+    runner.run([tool("ffmpeg"), "-hide_banner", "-nostats", "-i", path,
+                "-vf", "fps=4,scale=160:-2,blackdetect=d=0.5:pix_th=0.10,freezedetect=n=0.003:d=2",
+                "-af", "volumedetect", "-f", "null", "-"], on_line=lines.append)
+    black = sum(float(m) for l in lines for m in re.findall(r"black_duration:\s*([\d.]+)", l))
+    # freezedetect meldet Start/Ende; geht das Standbild bis zum Schluss, fehlt das Ende
+    starts = [float(m) for l in lines for m in re.findall(r"freeze_start:\s*([\d.]+)", l)]
+    ends = [float(m) for l in lines for m in re.findall(r"freeze_end:\s*([\d.]+)", l)]
+    frozen = sum((ends[k] if k < len(ends) else dur) - st for k, st in enumerate(starts))
+    mean_vol = next((float(m) for l in lines for m in re.findall(r"mean_volume:\s*(-?[\d.]+) dB", l)), None)
+    if dur > 0:
+        info["schwarz"] = round(black / dur * 100)
+        info["standbild"] = round(frozen / dur * 100)
+        if black / dur > 0.3:
+            problems.append(f"{info['schwarz']} % schwarzes Bild")
+        if frozen / dur > 0.5:
+            problems.append(f"{info['standbild']} % Standbild (Menü/Pause?)")
+    if mean_vol is not None:
+        info["lautstaerke"] = mean_vol
+        if a and mean_vol < -45:
+            problems.append("fast kein Ton")
+    return not problems, problems, info
+
+
 def _top_messages(msgs, n=4):
     counts = {}
     for m in msgs:

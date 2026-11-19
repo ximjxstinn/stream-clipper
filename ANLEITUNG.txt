@@ -14,6 +14,14 @@ SO GEHT'S
   4. "Ausgewählte clippen" oder "Alle clippen"
   Oder einfach "Alles automatisch" = analysieren + alle Top-Clips schneiden.
 
+NEU IN 2.6
+  - Jeder fertige Clip wird automatisch geprüft: schwarzes Bild, kein/kaum Ton, Standbild
+    (Menü/Pause), falsche Länge, zu niedrige Auflösung, kaputte Datei. Fehlerhafte Clips
+    werden nie automatisch hochgeladen. Spalte "Status" zeigt das Ergebnis.
+  - Freigabe: Geprüfte Clips landen bei "⏳ wartet auf deine Freigabe". Mit "▶ Ansehen"
+    anschauen, dann "✅ Freigeben & hochladen" – oder 👎, dann wird er nicht hochgeladen.
+    (Abschaltbar in den Upload-Einstellungen, dann lädt die App direkt hoch.)
+
 NEU IN 2.4
   - Bildanalyse: Stellen, an denen du in Menüs, Einstellungen, Pause oder "Gleich zurück"
     bist, werden erkannt (fast kein Bewegung im Bild) und durch die nächstbesten ersetzt.

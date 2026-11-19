@@ -23,7 +23,7 @@ except ImportError:  # Update von 2.1: alter Updater kannte uploader.py noch nic
     except Exception:
         uploader = None
 
-VERSION = "2.5"
+VERSION = "2.6"
 import sys
 SETTINGS_FILE = os.path.join(core.APP_DIR, "settings.json")
 SESSION_DIR = os.path.join(core.APP_DIR, "gespeichert")
@@ -340,7 +340,9 @@ class App:
         self.b_all.pack(side="left")
         self.b_auto = ttk.Button(act, text="⚡ Alles automatisch", style="Accent.TButton", command=self.full_auto)
         self.b_auto.pack(side="left", padx=6)
-        self.b_up = ttk.Button(act, text="⬆ Hochladen", command=self.upload_selected)
+        self.b_view = ttk.Button(act, text="▶ Ansehen", command=self.view_clip)
+        self.b_view.pack(side="left", padx=(0, 6))
+        self.b_up = ttk.Button(act, text="✅ Freigeben & hochladen", command=self.upload_selected)
         self.b_up.pack(side="left")
         self.b_cancel = ttk.Button(act, text="Abbrechen", command=self.cancel, state="disabled")
         self.b_cancel.pack(side="left", padx=6)
@@ -360,10 +362,11 @@ class App:
         # ---- Ergebnisliste ----
         tf = ttk.Frame(right)
         tf.pack(fill="both", expand=True, pady=(10, 0))
-        cols = ("rank", "time", "score", "reason", "chat")
+        cols = ("rank", "time", "score", "status", "reason", "chat")
         self.tree = ttk.Treeview(tf, columns=cols, show="headings", selectmode="extended")
         for c, t, w, a in [("rank", "#", 36, "center"), ("time", "Zeit im Stream", 110, "center"),
-                           ("score", "Hype", 60, "center"), ("reason", "Warum", 260, "w"),
+                           ("score", "Hype", 60, "center"), ("status", "Status", 190, "w"),
+                           ("reason", "Warum", 240, "w"),
                            ("chat", "Chat sagt …", 380, "w")]:
             self.tree.heading(c, text=t)
             self.tree.column(c, width=w, anchor=a, stretch=c in ("reason", "chat"))
@@ -375,9 +378,11 @@ class App:
         self.tree.tag_configure("done", foreground=GOOD)
         self.tree.tag_configure("good", background="#123d2c")
         self.tree.tag_configure("bad", foreground="#6b6b75")
+        self.tree.tag_configure("warn", foreground="#ffb347")
+        self.tree.tag_configure("pending", foreground="#7fd3ff")
         self.tree.bind("+", lambda e: self.rate(True))
         self.tree.bind("-", lambda e: self.rate(False))
-        ttk.Label(right, text="Tipp: Doppelklick öffnet die Stelle auf Twitch, damit du sie vorher ansehen kannst. "
+        ttk.Label(right, text="Tipp: Doppelklick öffnet die Stelle auf Twitch, „▶ Ansehen“ spielt den fertigen Clip ab. "
                               "👍/👎 (oder +/−) bringt der App deinen Geschmack bei – je mehr, desto besser.", foreground=MUTED).pack(anchor="w", pady=(4, 0))
 
         # ---- Log ----
@@ -508,9 +513,58 @@ class App:
             self.runner.cancel()
             self.log("Breche ab …")
 
+    def _status_text(self, h):
+        up = h.get("uploaded") or {}
+        if up:
+            return "⬆ hochgeladen (" + " + ".join({"yt": "YouTube", "tt": "TikTok"}[p] for p in up) + ")"
+        qc = h.get("qc")
+        if qc and not qc.get("ok"):
+            return "⚠ " + "; ".join(qc.get("problems", []))[:60]
+        if h.get("pending"):
+            return "⏳ wartet auf deine Freigabe"
+        if qc and qc.get("ok"):
+            return "✅ geprüft – ok"
+        if h.get("clipped"):
+            return "✂ geschnitten"
+        return ""
+
+    def _refresh_row(self, i):
+        iid = str(i)
+        if not self.tree.exists(iid) or i >= len(self.highlights):
+            return
+        h = self.highlights[i]
+        vals = list(self.tree.item(iid, "values"))
+        if len(vals) >= 4:
+            vals[3] = self._status_text(h)
+            self.tree.item(iid, values=vals)
+        tags = [t for t in self.tree.item(iid, "tags") if t not in ("done", "warn", "pending")]
+        qc = h.get("qc")
+        if qc and not qc.get("ok"):
+            tags.append("warn")
+        elif h.get("pending"):
+            tags.append("pending")
+        elif h.get("clipped"):
+            tags.append("done")
+        self.tree.item(iid, tags=tags)
+
+    def view_clip(self):
+        sel = self.tree.selection()
+        if not sel:
+            messagebox.showinfo("Ansehen", "Wähl einen Clip in der Liste aus.")
+            return
+        h = self.highlights[int(sel[0])]
+        files = h.get("files") or {}
+        path = next((p for p in (files.get("tall"), files.get("wide")) if p and os.path.isfile(p)), None)
+        if not path:
+            messagebox.showinfo("Ansehen", "Dieser Clip ist noch nicht geschnitten. Doppelklick zeigt die Stelle auf Twitch.")
+            return
+        try:
+            os.startfile(path)
+        except Exception:
+            webbrowser.open(path)
+
     def _mark_done(self, i):
-        if self.tree.exists(str(i)):
-            self.tree.item(str(i), tags=[t for t in self.tree.item(str(i), "tags") if t != "done"] + ["done"])
+        self._refresh_row(i)
         self.save_session()
 
     # ------------------------------------------------------- Infobereich (Tray) --
@@ -821,7 +875,8 @@ class App:
             if h.get("rated") is not None:
                 tags.append("good" if h["rated"] else "bad")
             self.tree.insert("", "end", iid=str(i), tags=tags, values=(
-                i + 1, core.fmt_time(h["time"]), h["score"], h["reason"], h["chat"]))
+                i + 1, core.fmt_time(h["time"]), h["score"], self._status_text(h), h["reason"], h["chat"]))
+            self._refresh_row(i)
         self._draw_curve()
         if autosave:
             self.save_session()
@@ -1014,6 +1069,9 @@ class App:
             if h.get("rated") is not None or "features" not in h:
                 continue
             h["rated"] = good
+            if not good and h.get("pending"):
+                h["pending"] = False  # 👎 = nicht hochladen
+                self._refresh_row(int(iid))
             n = core.save_feedback(h["features"], good)
             tags = [t for t in self.tree.item(iid, "tags") if t not in ("good", "bad")] + ["good" if good else "bad"]
             self.tree.item(iid, tags=tags)
@@ -1086,6 +1144,16 @@ class App:
                 self.log("   📱 TikTok-Version …")
                 tall = core.make_vertical(wide, base + "_tiktok.mp4", vstyle, self.runner)
             h["files"] = {"wide": wide if want_wide else None, "tall": tall, "vstyle": vstyle}
+            # Qualitäts-Check
+            check = tall or wide
+            try:
+                ok, probs, qinfo = core.check_clip(check, h["end"] - h["start"], self.runner, tall=bool(tall))
+            except core.Cancelled:
+                raise
+            except Exception as e:
+                ok, probs, qinfo = True, [], {"fehler": str(e)[:80]}
+            h["qc"] = {"ok": ok, "problems": probs, "info": qinfo}
+            self.log("   🔎 Check: " + ("✅ alles ok" if ok else "⚠ " + ", ".join(probs)))
             link = f"{core.vod_url(src['id'])}?t={core.twitch_t(h['start'])}" if src["kind"] == "vod" else ""
             lines.append(f"#{i + 1}  {core.fmt_time(h['start'])}  Hype {h['score']}  {h['reason']}  {link}")
             h["clipped"] = True
@@ -1107,9 +1175,25 @@ class App:
             conf = uploader.load_conf()
             plats = [p for p, k in (("yt", "yt_auto"), ("tt", "tt_auto")) if conf.get(k)]
             if plats:
-                best = sorted(items, key=lambda x: -x[1]["score"])[:max(1, int(conf.get("auto_max", 3)))]
-                self.log(f"⬆ Auto-Upload der besten {len(best)} Clips …")
-                self._upload_job(src, best, plats)
+                good = [x for x in items if (x[1].get("qc") or {}).get("ok", True)]
+                bad = len(items) - len(good)
+                if bad:
+                    self.log(f"⚠ {bad} Clip(s) haben den Check nicht bestanden und werden nicht hochgeladen.")
+                best = sorted(good, key=lambda x: -x[1]["score"])[:max(1, int(conf.get("auto_max", 3)))]
+                if not best:
+                    self.log("⬆ Kein Clip hat den Check bestanden – nichts hochgeladen.")
+                elif conf.get("approve", True):
+                    for i, h in best:
+                        h["pending"] = True
+                        self.ui(lambda i=i: self._refresh_row(i))
+                    self.ui(self.save_session)
+                    self.log(f"⏳ {len(best)} Clip(s) warten auf deine Freigabe: auswählen → „▶ Ansehen“ → "
+                             "„✅ Freigeben & hochladen“ (oder 👎 wenn er schlecht ist).")
+                    self.notify("⏳ Clips warten auf Freigabe",
+                                f"{len(best)} geprüfte Clips sind bereit. Öffne die App, schau sie dir an und gib sie frei.")
+                else:
+                    self.log(f"⬆ Auto-Upload der besten {len(best)} geprüften Clips …")
+                    self._upload_job(src, best, plats)
         return folder
 
     # ----------------------------------------------------------------- Upload --
@@ -1136,7 +1220,12 @@ class App:
             self.upload_settings()
             return
         names = " und ".join({"yt": "YouTube", "tt": "TikTok"}[p] for p in plats)
-        if not messagebox.askyesno("Hochladen", f"{len(sel)} Clip(s) zu {names} hochladen?"):
+        warn = [f"#{i + 1}: " + ", ".join(self.highlights[i]["qc"]["problems"]) for i in sel
+                if self.highlights[i].get("qc") and not self.highlights[i]["qc"].get("ok")]
+        if warn and not messagebox.askyesno("Achtung", "Diese Clips haben beim Check Probleme:\n\n" + "\n".join(warn)
+                                            + "\n\nTrotzdem hochladen?"):
+            return
+        if not messagebox.askyesno("Freigeben & hochladen", f"{len(sel)} Clip(s) zu {names} hochladen?"):
             return
         self._work(self._upload_job, self.meta, [(i, self.highlights[i]) for i in sel], plats)
 
@@ -1188,6 +1277,9 @@ class App:
                     if "Abgebrochen" in str(e):
                         raise core.Cancelled()
                     self.log(f"   ❌ {e}")
+                if up:
+                    h["pending"] = False
+                self.ui(lambda i=i: self._refresh_row(i))
                 self.ui(self.save_session)
         self.log(f"⬆ Upload fertig – {done} Upload(s) erfolgreich.")
         if done:
@@ -1294,13 +1386,20 @@ class App:
         row("Hashtags", ttk.Entry(f, textvariable=tags))
         amax = tk.IntVar(value=conf.get("auto_max", 3))
         row("Auto-Upload: beste", ttk.Spinbox(f, from_=1, to=15, textvariable=amax, width=5))
+        approve = tk.BooleanVar(value=conf.get("approve", True))
+        ttk.Checkbutton(f, text="Ich will jeden Clip vorher ansehen und freigeben (empfohlen)",
+                        variable=approve).grid(row=r, column=0, columnspan=3, sticky="w", pady=(4, 0)); r += 1
+        ttk.Label(f, text="Clips mit Fehlern (schwarzes Bild, kein Ton, Standbild, falsche Länge) werden nie "
+                          "automatisch hochgeladen.", style="Muted.TLabel", wraplength=560).grid(
+            row=r, column=0, columnspan=3, sticky="w"); r += 1
 
         def store():
             conf.update({"yt_privacy": privs[yt_priv.get()], "yt_what": whats[yt_what.get()],
                          "yt_auto": bool(yt_auto.get()), "tt_client_key": tt_key.get().strip(),
                          "tt_client_secret": tt_sec.get().strip(), "tt_mode": modes[tt_mode.get()],
                          "tt_auto": bool(tt_auto.get()), "title": title.get(),
-                         "description": desc.get("1.0", "end").strip(), "hashtags": tags.get()})
+                         "description": desc.get("1.0", "end").strip(), "hashtags": tags.get(),
+                         "approve": bool(approve.get())})
             try:
                 conf["auto_max"] = int(amax.get())
             except Exception:

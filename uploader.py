@@ -27,7 +27,7 @@ DEFAULT_CONF = {
     "title": "{stream} – Highlight #{nr} 🔥",
     "description": "Live auf https://twitch.tv/ximjxstinn 🎮\nFolg mir für mehr Clips!",
     "hashtags": "#fortnite #twitch #gaming #ximjxstinn #clips",
-    "auto_max": 3,
+    "auto_max": 3, "approve": True,
 }
 
 

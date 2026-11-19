@@ -1,6 +1,6 @@
 {
-  "version": "2.5",
-  "notes": "Fix: Fenster kommt aus dem Infobereich wieder maximiert zurück, passt sich an kleine Fenster an",
+  "version": "2.6",
+  "notes": "Neu: Automatischer Clip-Check + Freigabe vor dem Hochladen",
   "files": [
     "StreamClipper.pyw",
     "clipper_core.py",
