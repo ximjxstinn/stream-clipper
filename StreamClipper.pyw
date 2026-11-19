@@ -23,7 +23,7 @@ except ImportError:  # Update von 2.1: alter Updater kannte uploader.py noch nic
     except Exception:
         uploader = None
 
-VERSION = "2.2"
+VERSION = "2.3"
 import sys
 SETTINGS_FILE = os.path.join(core.APP_DIR, "settings.json")
 SESSION_DIR = os.path.join(core.APP_DIR, "gespeichert")
@@ -46,7 +46,7 @@ DEFAULTS = {
     "w_chat": 65, "audio": True, "fmt": FORMATS[2], "vstyle": "Blur-Hintergrund", "quality": "1080p",
     "bestof": False, "keywords": core.DEFAULT_KEYWORDS,
     "outdir": os.path.join(os.path.expanduser("~"), "Videos", "Stream Clips"),
-    "auto": False, "seen": [], "autostart": False, "autoupdate": True, "last_session": "",
+    "auto": False, "seen": [], "autostart": False, "autoupdate": True, "last_session": "", "tray": True, "tray_hint_shown": False,
 }
 
 
@@ -89,7 +89,10 @@ class App:
         self.root.after(400, self._restore_last)
         if self.s.get("autoupdate", True):
             self.root.after(2500, lambda: self.check_updates(silent=True))
-        self.root.protocol("WM_DELETE_WINDOW", self._close)
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close_button)
+        self.tray = None
+        self.root.bind("<Unmap>", self._on_unmap)
+        threading.Thread(target=self._setup_tray, daemon=True).start()
         if self.s.get("auto"):
             self.root.after(3000, self._auto_tick)
 
@@ -247,6 +250,11 @@ class App:
         ttk.Checkbutton(left, text="Mit Windows starten (läuft im Hintergrund)", variable=self.v_autostart,
                         command=self._toggle_autostart).grid(row=r, column=0, columnspan=3, sticky="w", pady=(2, 0))
         r += 1
+        self.v_tray = tk.BooleanVar(value=s.get("tray", True))
+        ttk.Checkbutton(left, text="Schließen/Minimieren → unten rechts im Infobereich weiterlaufen",
+                        variable=self.v_tray, command=self.settings).grid(row=r, column=0, columnspan=3,
+                                                                          sticky="w", pady=(2, 0))
+        r += 1
         self.v_autoupdate = tk.BooleanVar(value=s.get("autoupdate", True))
         ttk.Checkbutton(left, text="Updates automatisch laden & installieren", variable=self.v_autoupdate,
                         command=self.settings).grid(row=r, column=0, columnspan=3, sticky="w", pady=(2, 0))
@@ -370,7 +378,7 @@ class App:
             "quality": self.v_quality.get(), "bestof": bool(self.v_bestof.get()),
             "keywords": self.t_kw.get("1.0", "end").strip(), "outdir": self.v_out.get().strip() or DEFAULTS["outdir"],
             "auto": bool(self.v_auto.get()), "autostart": bool(self.v_autostart.get()),
-            "autoupdate": bool(self.v_autoupdate.get()),
+            "autoupdate": bool(self.v_autoupdate.get()), "tray": bool(self.v_tray.get()),
         })
         self.save()
         return dict(s)
@@ -448,12 +456,141 @@ class App:
             self.tree.item(str(i), tags=[t for t in self.tree.item(str(i), "tags") if t != "done"] + ["done"])
         self.save_session()
 
-    def _close(self):
+    # ------------------------------------------------------- Infobereich (Tray) --
+    def _setup_tray(self):
+        """Tray-Icon unten rechts. Braucht pystray + Pillow – werden beim ersten Mal automatisch installiert."""
+        try:
+            import pystray
+            from PIL import Image, ImageDraw
+        except ImportError:
+            try:
+                import subprocess
+                self.log("⬇ Installiere einmalig das Infobereich-Modul (pystray) …")
+                kw = {"creationflags": 0x08000000} if os.name == "nt" else {}
+                subprocess.run([sys.executable, "-m", "pip", "install", "--user", "--quiet", "--disable-pip-version-check",
+                                "pystray", "pillow"], check=True, stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, timeout=300, **kw)
+                import importlib, site
+                importlib.invalidate_caches()
+                try:
+                    sys.path.append(site.getusersitepackages())
+                except Exception:
+                    pass
+                import pystray
+                from PIL import Image, ImageDraw
+            except Exception as e:
+                self.log(f"⚠ Infobereich nicht verfügbar ({e}) – App schließt dann normal.")
+                return
+        img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+        d = ImageDraw.Draw(img)
+        d.rounded_rectangle((2, 2, 62, 62), radius=14, fill=(145, 71, 255, 255))
+        # Schere
+        d.ellipse((10, 34, 26, 50), outline="white", width=4)
+        d.ellipse((10, 14, 26, 30), outline="white", width=4)
+        d.line((24, 26, 54, 46), fill="white", width=5)
+        d.line((24, 38, 54, 18), fill="white", width=5)
+        self._tray_img = img
+
+        def on_ui(fn):
+            return lambda icon, item: self.ui(fn)
+
+        menu = pystray.Menu(
+            pystray.MenuItem("Öffnen", on_ui(self.show_window), default=True),
+            pystray.MenuItem("Neuesten Stream jetzt clippen", on_ui(self._tray_clip_latest)),
+            pystray.MenuItem("Auto-Modus", on_ui(self._tray_toggle_auto),
+                             checked=lambda item: bool(self.s.get("auto"))),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem("Beenden", on_ui(self._quit)),
+        )
+        self.tray = pystray.Icon("StreamClipper", img, f"Stream Clipper v{VERSION}", menu)
+        self.ui(lambda: self.root.iconphoto(True, self._tk_icon()) if self._tk_icon() else None)
+        self.tray.run()
+
+    def _tk_icon(self):
+        try:
+            from PIL import ImageTk
+            if not hasattr(self, "_tkimg"):
+                self._tkimg = ImageTk.PhotoImage(self._tray_img)
+            return self._tkimg
+        except Exception:
+            return None
+
+    def _use_tray(self):
+        return self.tray is not None and bool(self.v_tray.get())
+
+    def hide_to_tray(self):
+        self.root.withdraw()
+        if not self.s.get("tray_hint_shown"):
+            self.notify("Stream Clipper läuft weiter",
+                        "Ich bin hier unten im Infobereich. Doppelklick zum Öffnen, Rechtsklick → Beenden.")
+            self.s["tray_hint_shown"] = True
+            self.save()
+
+    def show_window(self):
+        self.root.deiconify()
+        self.root.state("normal")
+        self.root.lift()
+        self.root.attributes("-topmost", True)
+        self.root.after(200, lambda: self.root.attributes("-topmost", False))
+        self.root.focus_force()
+
+    def _on_unmap(self, event):
+        if event.widget is self.root and self._use_tray():
+            self.root.after(50, lambda: self.hide_to_tray() if self.root.state() == "iconic" else None)
+
+    def _on_close_button(self):
+        if self._use_tray():
+            self.settings()
+            self.save_session()
+            self.hide_to_tray()
+        else:
+            self._quit()
+
+    def notify(self, title, msg):
+        """Windows-Benachrichtigung unten rechts (nur wenn das Fenster versteckt ist oder es wichtig ist)."""
+        try:
+            if self.tray:
+                self.tray.notify(msg[:250], title[:60])
+        except Exception:
+            pass
+
+    def _tray_clip_latest(self):
+        if self.busy:
+            self.notify("Stream Clipper", "Ich arbeite gerade schon an etwas.")
+            return
+        st = self.settings()
+
+        def job():
+            core.ensure_tools(self.log, self.runner)
+            vods = core.list_vods(st["channel"], self.runner, limit=1)
+            if not vods:
+                self.notify("Stream Clipper", "Kein VOD gefunden.")
+                return
+            v = vods[0]
+            self.notify("Stream Clipper", f"Clippe jetzt: {v['title']}")
+            self._full_auto_job({"kind": "vod", "id": v["id"], "title": v["title"]}, st)
+        self._work(job)
+
+    def _tray_toggle_auto(self):
+        self.v_auto.set(not self.v_auto.get())
+        self._toggle_auto()
+        if self.tray:
+            self.tray.update_menu()
+        self.notify("Auto-Modus", "an – neue Streams werden automatisch geclippt" if self.v_auto.get() else "aus")
+
+    def _quit(self):
         self.settings()
         self.save_session()
         if self.runner:
             self.runner.cancel()
+        if self.tray:
+            try:
+                self.tray.stop()
+            except Exception:
+                pass
         self.root.destroy()
+
+    _close = _quit
 
     # --------------------------------------------------------------- actions --
     def update_tools(self):
@@ -695,6 +832,11 @@ class App:
         except Exception as e:
             self.log(f"Bitte App selbst neu starten ({e})")
             return
+        if self.tray:
+            try:
+                self.tray.stop()
+            except Exception:
+                pass
         self.root.after(300, self.root.destroy)
 
     def _draw_curve(self):
@@ -848,6 +990,7 @@ class App:
         with open(os.path.join(folder, "highlights.txt"), "w", encoding="utf-8") as f:
             f.write("\n".join(lines) + "\n")
         self.log(f"✅ Fertig! {len(items)} Clips gespeichert in: {folder}")
+        self.notify("✂ Clips fertig", f"{len(items)} Clips aus „{src.get('title', 'Stream')}“ sind fertig.")
         if uploader:
             conf = uploader.load_conf()
             plats = [p for p, k in (("yt", "yt_auto"), ("tt", "tt_auto")) if conf.get(k)]
@@ -935,6 +1078,9 @@ class App:
                     self.log(f"   ❌ {e}")
                 self.ui(self.save_session)
         self.log(f"⬆ Upload fertig – {done} Upload(s) erfolgreich.")
+        if done:
+            self.notify("⬆ Upload fertig", f"{done} Upload(s) erfolgreich" +
+                        (" – TikTok-Entwürfe warten in deiner App!" if "tt" in plats else "."))
 
     def upload_settings(self):
         if not uploader:
@@ -1128,6 +1274,7 @@ class App:
             return
         for v in reversed(new):
             self.log(f"⚡ Auto-Modus: neuer Stream gefunden – {v['title']}")
+            self.notify("⚡ Neuer Stream gefunden", f"Clippe jetzt automatisch: {v['title']}")
             src = {"kind": "vod", "id": v["id"], "title": v["title"]}
             try:
                 self._full_auto_job(src, st)
@@ -1144,9 +1291,11 @@ def main():
     except Exception:
         pass
     root = tk.Tk()
-    App(root)
+    app = App(root)
     if "--minimized" in sys.argv:
-        root.iconify()
+        root.withdraw()  # direkt in den Infobereich
+        # Falls das Tray-Modul nicht lädt, nach 20 s wenigstens in der Taskleiste zeigen
+        root.after(20000, lambda: root.iconify() if app.tray is None else None)
     root.mainloop()
 
 

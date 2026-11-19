@@ -1,5 +1,13 @@
 {
-  "version": "2.2",
-  "notes": "Neu: Upload zu YouTube & TikTok (manuell oder automatisch nach dem Clippen)",
-  "files": ["StreamClipper.pyw", "clipper_core.py", "updater.py", "uploader.py", "start.bat", "ANLEITUNG.txt", "UPLOAD-EINRICHTEN.txt"]
+  "version": "2.3",
+  "notes": "Neu: Läuft beim Schließen/Minimieren unten rechts im Infobereich weiter + Benachrichtigungen",
+  "files": [
+    "StreamClipper.pyw",
+    "clipper_core.py",
+    "updater.py",
+    "uploader.py",
+    "start.bat",
+    "ANLEITUNG.txt",
+    "UPLOAD-EINRICHTEN.txt"
+  ]
 }

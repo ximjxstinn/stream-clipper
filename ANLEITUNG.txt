@@ -14,6 +14,12 @@ SO GEHT'S
   4. "Ausgewählte clippen" oder "Alle clippen"
   Oder einfach "Alles automatisch" = analysieren + alle Top-Clips schneiden.
 
+NEU IN 2.3
+  - Schließen (X) oder Minimieren -> die App läuft unten rechts im Infobereich (neben der Uhr) weiter.
+    Doppelklick = öffnen, Rechtsklick = Menü (Neuesten Stream clippen, Auto-Modus, Beenden).
+  - Windows-Benachrichtigungen, wenn Clips/Uploads fertig sind oder ein neuer Stream gefunden wurde.
+  - Abschaltbar: Haken "Schließen/Minimieren -> unten rechts im Infobereich weiterlaufen".
+
 NEU IN 2.2
   - Upload zu YouTube (Shorts oder normale Videos) und TikTok – per Knopf "⬆ Hochladen"
     oder automatisch nach dem Clippen (die besten X Clips).
