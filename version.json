@@ -1,6 +1,6 @@
 {
-  "version": "2.7",
-  "notes": "Fix: TikTok schaltet bei ungeprüfter App automatisch auf Entwurf-Upload um",
+  "version": "2.8",
+  "notes": "Neu: Eigene Aufnahme per Drag & Drop reinziehen – ersetzt die aktuelle Liste",
   "files": [
     "StreamClipper.pyw",
     "clipper_core.py",

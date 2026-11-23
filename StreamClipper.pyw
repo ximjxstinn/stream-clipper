@@ -23,7 +23,7 @@ except ImportError:  # Update von 2.1: alter Updater kannte uploader.py noch nic
     except Exception:
         uploader = None
 
-VERSION = "2.7"
+VERSION = "2.8"
 import sys
 SETTINGS_FILE = os.path.join(core.APP_DIR, "settings.json")
 SESSION_DIR = os.path.join(core.APP_DIR, "gespeichert")
@@ -37,6 +37,7 @@ TEXT = "#efeff1"
 MUTED = "#adadb8"
 GOOD = "#00f593"
 
+VIDEO_EXTS = (".mp4", ".mkv", ".mov", ".flv", ".ts", ".webm", ".avi", ".m4v")
 FORMATS = ["16:9 (YouTube/Twitch)", "9:16 (TikTok/Shorts)", "Beides"]
 VSTYLES = {"Blur-Hintergrund": "blur", "Mitte zuschneiden": "crop"}
 QUALITIES = ["1080p", "720p", "Beste"]
@@ -568,25 +569,82 @@ class App:
         self.save_session()
 
     # ------------------------------------------------------- Infobereich (Tray) --
+    def _pip(self, *pkgs):
+        """Installiert fehlende Python-Pakete einmalig (ohne Konsolenfenster)."""
+        import subprocess, importlib, site
+        kw = {"creationflags": 0x08000000} if os.name == "nt" else {}
+        subprocess.run([sys.executable, "-m", "pip", "install", "--user", "--quiet", "--disable-pip-version-check",
+                        *pkgs], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                       stdin=subprocess.DEVNULL, timeout=300, **kw)
+        importlib.invalidate_caches()
+        try:
+            up = site.getusersitepackages()
+            if up not in sys.path:
+                sys.path.append(up)
+        except Exception:
+            pass
+
+    # ---------------------------------------------------- Drag & Drop (Aufnahme reinziehen) --
+    def _setup_dnd(self):
+        if os.name != "nt":
+            return
+        try:
+            import windnd
+        except ImportError:
+            try:
+                self.log("⬇ Installiere einmalig Drag & Drop (windnd) …")
+                self._pip("windnd")
+                import windnd
+            except Exception as e:
+                self.log(f"⚠ Drag & Drop nicht verfügbar ({e}) – nimm stattdessen „Datei: …“.")
+                return
+        self.ui(lambda: self._hook_dnd(windnd))
+
+    def _hook_dnd(self, windnd):
+        try:
+            windnd.hook_dropfiles(self.root, func=self._on_drop, force_unicode=True)
+            self.log("✔ Drag & Drop bereit – zieh eine Aufnahme einfach ins Fenster.")
+        except Exception as e:
+            self.log(f"⚠ Drag & Drop ging nicht ({e}) – nimm stattdessen „Datei: …“.")
+
+    def _on_drop(self, files):
+        # kommt direkt aus Windows → erst danach in Ruhe in Tk weiterarbeiten
+        paths = [f.decode("utf-8", "replace") if isinstance(f, bytes) else str(f) for f in files]
+        self.root.after(50, lambda: self.handle_drop(paths))
+
+    def handle_drop(self, paths):
+        vids = [p for p in paths if os.path.isfile(p) and p.lower().endswith(VIDEO_EXTS)]
+        if not vids:
+            messagebox.showinfo("Reinziehen", "Das ist keine Video-Datei.\nErlaubt: " + ", ".join(VIDEO_EXTS))
+            return
+        if self.busy:
+            messagebox.showinfo("Moment", "Die App arbeitet gerade noch. Klick erst auf „Abbrechen“ "
+                                          "und zieh die Aufnahme dann nochmal rein.")
+            return
+        path = vids[0]
+        if len(vids) > 1:
+            self.log(f"ℹ Mehrere Dateien – nehme die erste: {os.path.basename(path)}")
+        # alte Analyse ist schon gespeichert (Ordner „gespeichert“) → Liste leeren und ersetzen
+        self.save_session()
+        self.highlights, self.curve, self.meta = [], [], None
+        self.tree.delete(*self.tree.get_children())
+        self._draw_curve()
+        self.v_file.set(path)
+        self.src_kind.set("file")
+        self.show_window()
+        self.log(f"📥 Neue Aufnahme: {os.path.basename(path)} – alte Clips aus der Liste ersetzt, analysiere …")
+        self.analyze()
+
     def _setup_tray(self):
         """Tray-Icon unten rechts. Braucht pystray + Pillow – werden beim ersten Mal automatisch installiert."""
+        self._setup_dnd()  # zuerst Drag & Drop (gleicher Thread → keine zwei pip-Installationen gleichzeitig)
         try:
             import pystray
             from PIL import Image, ImageDraw
         except ImportError:
             try:
-                import subprocess
                 self.log("⬇ Installiere einmalig das Infobereich-Modul (pystray) …")
-                kw = {"creationflags": 0x08000000} if os.name == "nt" else {}
-                subprocess.run([sys.executable, "-m", "pip", "install", "--user", "--quiet", "--disable-pip-version-check",
-                                "pystray", "pillow"], check=True, stdout=subprocess.DEVNULL,
-                               stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, timeout=300, **kw)
-                import importlib, site
-                importlib.invalidate_caches()
-                try:
-                    sys.path.append(site.getusersitepackages())
-                except Exception:
-                    pass
+                self._pip("pystray", "pillow")
                 import pystray
                 from PIL import Image, ImageDraw
             except Exception as e:
@@ -1011,7 +1069,7 @@ class App:
         c.delete("all")
         w, h = c.winfo_width(), c.winfo_height()
         if not self.curve:
-            c.create_text(w / 2, h / 2, text="Hier erscheint nach der Analyse die Hype-Kurve deines Streams",
+            c.create_text(w / 2, h / 2, text="📥 Zieh eine Aufnahme hier rein – oder wähle links ein VOD und klick auf Analysieren",
                           fill=MUTED, font=("Segoe UI", 10))
             return
         pad = 22
