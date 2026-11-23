@@ -14,6 +14,17 @@ SO GEHT'S
   4. "Ausgewählte clippen" oder "Alle clippen"
   Oder einfach "Alles automatisch" = analysieren + alle Top-Clips schneiden.
 
+NEU IN 3.0 – LIVE-CLIPPER (auch für PS5-Streams)
+  - Haken "Während ich live bin automatisch Twitch-Clips machen" setzen und App laufen lassen.
+  - Sobald du live gehst (egal ob PC oder PS5), liest die App deinen Chat mit und hört deinen
+    Stream-Ton ab. Bei Hype (viele Leute schreiben, Hype-Wörter, "clip"/"!clip", du schreist/lachst)
+    erstellt sie automatisch einen echten Twitch-Clip auf deinem Kanal.
+  - Jeder Clip wird geladen, als TikTok-Version gebaut, geprüft und erscheint in der Liste
+    ("🔴 LIVE"). Nach dem Stream werden die besten zur Freigabe/zum Upload vorgemerkt.
+  - Einmalig nötig: "Mit Twitch verbinden" (Client-ID deiner Twitch-App + im Browser bestätigen).
+  - Empfindlichkeit: Hoch = mehr Clips, Niedrig = nur große Momente. Clip-Länge 10-60 s.
+  - Ist der Live-Clipper an, clippt der Auto-Modus dieselben Streams nicht nochmal aus dem VOD.
+
 NEU IN 2.8
   - Drag & Drop: Eigene Aufnahme (mp4, mkv, mov, flv, ts, webm, avi) einfach ins Fenster ziehen.
     Die aktuelle Liste wird ersetzt (die alte Analyse bleibt im Ordner "gespeichert")

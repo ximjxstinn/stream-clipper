@@ -1,11 +1,12 @@
 {
-  "version": "2.9.1",
-  "notes": "Updater findet neue Versionen jetzt sofort",
+  "version": "3.0",
+  "notes": "Neu: Live-Clipper – clippt automatisch während du live bist (auch PS5)",
   "files": [
     "StreamClipper.pyw",
     "clipper_core.py",
     "updater.py",
     "uploader.py",
+    "live_clipper.py",
     "start.bat",
     "ANLEITUNG.txt",
     "UPLOAD-EINRICHTEN.txt"

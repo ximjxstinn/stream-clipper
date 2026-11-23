@@ -23,7 +23,17 @@ except ImportError:  # Update von 2.1: alter Updater kannte uploader.py noch nic
     except Exception:
         uploader = None
 
-VERSION = "2.9.1"
+try:
+    import live_clipper
+except ImportError:  # ältere Updater kennen live_clipper.py noch nicht → selbst nachladen
+    try:
+        with open(os.path.join(core.APP_DIR, "live_clipper.py"), "wb") as _f:
+            _f.write(updater._get(updater.REPO_RAW + "live_clipper.py"))
+        import live_clipper
+    except Exception:
+        live_clipper = None
+
+VERSION = "3.0"
 import sys
 SETTINGS_FILE = os.path.join(core.APP_DIR, "settings.json")
 SESSION_DIR = os.path.join(core.APP_DIR, "gespeichert")
@@ -47,7 +57,7 @@ DEFAULTS = {
     "w_chat": 65, "audio": True, "fmt": FORMATS[2], "vstyle": "Blur-Hintergrund", "quality": "1080p",
     "bestof": False, "nomenu": True, "keywords": core.DEFAULT_KEYWORDS,
     "outdir": os.path.join(os.path.expanduser("~"), "Videos", "Stream Clips"),
-    "auto": False, "seen": [], "autostart": False, "autoupdate": True, "last_session": "", "tray": True, "tray_hint_shown": False, "win_zoomed": True, "win_geo": "",
+    "auto": False, "seen": [], "autostart": False, "autoupdate": True, "last_session": "", "tray": True, "tray_hint_shown": False, "live": False, "live_sens": "Mittel", "live_len": 30, "live_max": 25, "win_zoomed": True, "win_geo": "",
 }
 
 
@@ -99,6 +109,9 @@ class App:
         self.root.after(400, self._restore_last)
         if self.s.get("autoupdate", True):
             self.root.after(2500, lambda: self.check_updates(silent=True))
+        self.live = None
+        if self.s.get("live"):
+            self.root.after(4000, self._toggle_live)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close_button)
         self.tray = None
         self.root.bind("<Unmap>", self._on_unmap)
@@ -307,6 +320,34 @@ class App:
         ttk.Button(left, text="⬆ Upload zu YouTube & TikTok einrichten …", style="Accent.TButton",
                    command=self.upload_settings).grid(row=r, column=0, columnspan=3, sticky="we", pady=(10, 0))
         r += 1
+        # ---- Live-Clipper ----
+        ttk.Label(left, text="🔴 Live-Clipper (PC & PS5)", style="Sec.TLabel").grid(
+            row=r, column=0, columnspan=3, sticky="w", pady=(14, 2))
+        r += 1
+        self.v_live = tk.BooleanVar(value=s.get("live", False))
+        ttk.Checkbutton(left, text="Während ich live bin automatisch Twitch-Clips machen", variable=self.v_live,
+                        command=self._toggle_live).grid(row=r, column=0, columnspan=3, sticky="w")
+        r += 1
+        self.v_live_state = tk.StringVar(value="aus")
+        ttk.Label(left, text="Status:", style="Panel.TLabel").grid(row=r, column=0, sticky="w")
+        ttk.Label(left, textvariable=self.v_live_state, style="Muted.TLabel").grid(row=r, column=1, columnspan=2,
+                                                                                    sticky="w")
+        r += 1
+        ttk.Label(left, text="Empfindlichkeit", style="Panel.TLabel").grid(row=r, column=0, sticky="w", pady=2)
+        self.v_live_sens = tk.StringVar(value=s.get("live_sens", "Mittel"))
+        ttk.Combobox(left, textvariable=self.v_live_sens, state="readonly", width=22,
+                     values=list(live_clipper.SENSITIVITY) if live_clipper else ["Mittel"]).grid(
+            row=r, column=1, columnspan=2, sticky="we", pady=2)
+        r += 1
+        ttk.Label(left, text="Clip-Länge (Sek.)", style="Panel.TLabel").grid(row=r, column=0, sticky="w", pady=2)
+        self.v_live_len = tk.IntVar(value=s.get("live_len", 30))
+        ttk.Spinbox(left, from_=10, to=60, textvariable=self.v_live_len, width=6).grid(row=r, column=2, sticky="e")
+        r += 1
+        self.v_tw_status = tk.StringVar(value=self._twitch_status())
+        ttk.Button(left, text="🟣 Mit Twitch verbinden …", command=self.twitch_connect).grid(
+            row=r, column=0, columnspan=2, sticky="we", pady=(4, 0))
+        ttk.Label(left, textvariable=self.v_tw_status, style="Muted.TLabel").grid(row=r, column=2, sticky="e")
+        r += 1
         bf = ttk.Frame(left, style="Panel.TFrame")
         bf.grid(row=r, column=0, columnspan=3, sticky="we", pady=(10, 0))
         ttk.Button(bf, text="🔄 Nach Updates suchen", command=lambda: self.check_updates(False)).pack(
@@ -442,8 +483,11 @@ class App:
             "keywords": self.t_kw.get("1.0", "end").strip(), "outdir": self.v_out.get().strip() or DEFAULTS["outdir"],
             "auto": bool(self.v_auto.get()), "autostart": bool(self.v_autostart.get()),
             "autoupdate": bool(self.v_autoupdate.get()), "tray": bool(self.v_tray.get()),
+            "live": bool(self.v_live.get()), "live_sens": self.v_live_sens.get(), "live_len": num(self.v_live_len, 30),
         })
         self.save()
+        if getattr(self, "live", None):
+            self.live.st.update(self._live_settings())
         return dict(s)
 
     def save(self):
@@ -567,6 +611,118 @@ class App:
     def _mark_done(self, i):
         self._refresh_row(i)
         self.save_session()
+
+    # ------------------------------------------------------------ Live-Clipper --
+    def _twitch_status(self):
+        if not live_clipper:
+            return "Modul fehlt"
+        c = live_clipper.load_conf()
+        return f"✅ {c.get('login')}" if c.get("refresh_token") else "nicht verbunden"
+
+    def _live_settings(self):
+        st = dict(self.s)
+        st["vstyle_key"] = VSTYLES.get(self.s.get("vstyle"), "blur")
+        return st
+
+    def twitch_connect(self):
+        if not live_clipper:
+            messagebox.showerror("Live-Clipper", "live_clipper.py fehlt – bitte „Nach Updates suchen“.")
+            return
+        c = live_clipper.load_conf()
+        win = tk.Toplevel(self.root)
+        win.title("Mit Twitch verbinden")
+        win.configure(bg=BG)
+        win.transient(self.root)
+        f = ttk.Frame(win, style="Panel.TFrame", padding=16)
+        f.pack(fill="both", expand=True, padx=12, pady=12)
+        ttk.Label(f, text="Damit die App live echte Twitch-Clips machen darf, braucht sie einmalig Zugriff auf "
+                          "„Clips erstellen“ in deinem Twitch-Konto.", style="Panel.TLabel", wraplength=480).pack(anchor="w")
+        ttk.Label(f, text="Client-ID deiner Twitch-App:", style="Panel.TLabel").pack(anchor="w", pady=(12, 2))
+        cid = tk.StringVar(value=c.get("client_id", ""))
+        ttk.Entry(f, textvariable=cid, width=50).pack(fill="x")
+        ttk.Button(f, text="Twitch-App anlegen (dev.twitch.tv) …",
+                   command=lambda: webbrowser.open("https://dev.twitch.tv/console/apps/create")).pack(anchor="w", pady=6)
+        status = tk.StringVar(value=self._twitch_status())
+        ttk.Label(f, textvariable=status, style="Muted.TLabel").pack(anchor="w", pady=(4, 8))
+
+        def go():
+            status.set("⏳ Browser geöffnet – dort auf „Aktivieren“/„Autorisieren“ klicken …")
+            tw = live_clipper.Twitch()
+
+            def job():
+                try:
+                    name = tw.device_login(cid.get(), self.log, webbrowser.open)
+                    self.log(f"✅ Twitch verbunden: {name}")
+                    self.ui(lambda: (status.set(f"✅ verbunden als {name}"), self.v_tw_status.set(f"✅ {name}")))
+                    if self.v_live.get():
+                        self.ui(self._restart_live)
+                except Exception as e:
+                    self.log(f"❌ {e}")
+                    self.ui(lambda: status.set("❌ fehlgeschlagen – siehe Log"))
+            threading.Thread(target=job, daemon=True).start()
+        ttk.Button(f, text="Verbinden", style="Accent.TButton", command=go).pack(anchor="e")
+
+    def _toggle_live(self):
+        on = bool(self.v_live.get())
+        self.settings()
+        if not on:
+            if self.live:
+                self.live.stop()
+                self.live = None
+            self.v_live_state.set("aus")
+            self.log("Live-Clipper aus.")
+            return
+        if not live_clipper:
+            self.log("❌ live_clipper.py fehlt – bitte „Nach Updates suchen“.")
+            return
+        tw = live_clipper.Twitch()
+        if not tw.connected():
+            self.v_live_state.set("erst mit Twitch verbinden")
+            self.twitch_connect()
+            return
+        self._restart_live()
+
+    def _restart_live(self):
+        if self.live:
+            self.live.stop()
+
+        def threaded_ensure():
+            try:
+                core.ensure_tools(self.log, core.Runner(self.log))
+            except Exception as e:
+                self.log(f"⚠ Tools: {e}")
+            self.ui(start)
+
+        def start():
+            self.live = live_clipper.LiveClipper(
+                live_clipper.Twitch(), self._live_settings(), self.log,
+                on_clip=lambda stream, h: self.ui(lambda: self._add_live_clip(stream, h)),
+                on_state=lambda txt: self.ui(lambda: self.v_live_state.set(txt)),
+                notify=self.notify)
+            self.live.on_end = lambda stream: self.ui(lambda: self._live_stream_ended(stream))
+            self.live.start()
+        threading.Thread(target=threaded_ensure, daemon=True).start()
+
+    def _add_live_clip(self, stream, h):
+        sid = str(stream.get("id", "live"))
+        if not (self.meta and self.meta.get("kind") == "live" and str(self.meta.get("id")) == sid):
+            self.save_session()
+            title = stream.get("title") or "Live"
+            self._show({"kind": "live", "id": sid, "title": title}, [], [], autosave=False)
+            self.log(f"🔴 Neue Live-Liste für „{title}“ – Live-Clips landen hier.")
+        self.highlights.append(h)
+        i = len(self.highlights) - 1
+        self.tree.insert("", "end", iid=str(i), values=(
+            i + 1, core.fmt_time(h["time"]), h["score"], self._status_text(h), h["reason"], h["chat"]))
+        self._refresh_row(i)
+        self.tree.see(str(i))
+        self.save_session()
+
+    def _live_stream_ended(self, stream):
+        if not (self.meta and self.meta.get("kind") == "live" and self.highlights):
+            return
+        items = list(enumerate(self.highlights))
+        threading.Thread(target=lambda: self._auto_upload(self.meta, items, direct=False), daemon=True).start()
 
     # ------------------------------------------------------- Infobereich (Tray) --
     def _pip(self, *pkgs):
@@ -772,6 +928,8 @@ class App:
     def _quit(self):
         self.settings()
         self.save_session()
+        if self.live:
+            self.live.stop()
         if self.runner:
             self.runner.cancel()
         if self.tray:
@@ -948,7 +1106,12 @@ class App:
 
     # --------------------------------------------------------------- Speichern --
     def _session_file(self, src):
-        key = src["id"] if src["kind"] == "vod" else "datei_" + core.safe_name(src.get("title", ""), 50)
+        if src["kind"] == "vod":
+            key = src["id"]
+        elif src["kind"] == "live":
+            key = "live_" + str(src.get("id", ""))
+        else:
+            key = "datei_" + core.safe_name(src.get("title", ""), 50)
         return os.path.join(SESSION_DIR, f"{key}.json")
 
     def save_session(self, path=None):
@@ -1118,7 +1281,9 @@ class App:
         if not sel or not self.meta:
             return
         h = self.highlights[int(sel[0])]
-        if self.meta["kind"] == "vod":
+        if h.get("clip_url"):
+            webbrowser.open(h["clip_url"])
+        elif self.meta["kind"] == "vod":
             webbrowser.open(f"{core.vod_url(self.meta['id'])}?t={core.twitch_t(h['start'])}")
         else:
             messagebox.showinfo("Stelle", f"Spring in deiner Aufnahme zu {core.fmt_time(h['start'])}.")
@@ -1174,6 +1339,10 @@ class App:
     def clip(self, everything):
         if not self.highlights:
             messagebox.showinfo("Erst analysieren", "Klick zuerst auf \"Analysieren\".")
+            return
+        if self.meta and self.meta.get("kind") == "live":
+            messagebox.showinfo("Live-Clips", "Live-Clips sind schon fertig geschnitten. Mit „▶ Ansehen“ anschauen "
+                                              "und mit „✅ Freigeben & hochladen“ hochladen.")
             return
         idx = list(range(len(self.highlights))) if everything else [int(i) for i in self.tree.selection()]
         if not idx:
@@ -1236,30 +1405,45 @@ class App:
             f.write("\n".join(lines) + "\n")
         self.log(f"✅ Fertig! {len(items)} Clips gespeichert in: {folder}")
         self.notify("✂ Clips fertig", f"{len(items)} Clips aus „{src.get('title', 'Stream')}“ sind fertig.")
-        if uploader:
-            conf = uploader.load_conf()
-            plats = [p for p, k in (("yt", "yt_auto"), ("tt", "tt_auto")) if conf.get(k)]
-            if plats:
-                good = [x for x in items if (x[1].get("qc") or {}).get("ok", True)]
-                bad = len(items) - len(good)
-                if bad:
-                    self.log(f"⚠ {bad} Clip(s) haben den Check nicht bestanden und werden nicht hochgeladen.")
-                best = sorted(good, key=lambda x: -x[1]["score"])[:max(1, int(conf.get("auto_max", 3)))]
-                if not best:
-                    self.log("⬆ Kein Clip hat den Check bestanden – nichts hochgeladen.")
-                elif conf.get("approve", True):
-                    for i, h in best:
-                        h["pending"] = True
-                        self.ui(lambda i=i: self._refresh_row(i))
-                    self.ui(self.save_session)
-                    self.log(f"⏳ {len(best)} Clip(s) warten auf deine Freigabe: auswählen → „▶ Ansehen“ → "
-                             "„✅ Freigeben & hochladen“ (oder 👎 wenn er schlecht ist).")
-                    self.notify("⏳ Clips warten auf Freigabe",
-                                f"{len(best)} geprüfte Clips sind bereit. Öffne die App, schau sie dir an und gib sie frei.")
-                else:
-                    self.log(f"⬆ Auto-Upload der besten {len(best)} geprüften Clips …")
-                    self._upload_job(src, best, plats)
+        self._auto_upload(src, items, direct=True)
         return folder
+
+    def _auto_upload(self, src, items, direct=True):
+        """Nach dem Clippen: beste geprüfte Clips zur Freigabe vormerken oder direkt hochladen."""
+        if not uploader:
+            return
+        conf = uploader.load_conf()
+        plats = [p for p, k in (("yt", "yt_auto"), ("tt", "tt_auto")) if conf.get(k)]
+        if not plats:
+            return
+        good = [x for x in items if (x[1].get("qc") or {}).get("ok", True) and not (x[1].get("uploaded") or {})]
+        bad = len([x for x in items if not (x[1].get("qc") or {}).get("ok", True)])
+        if bad:
+            self.log(f"⚠ {bad} Clip(s) haben den Check nicht bestanden und werden nicht hochgeladen.")
+        best = sorted(good, key=lambda x: -x[1]["score"])[:max(1, int(conf.get("auto_max", 3)))]
+        if not best:
+            self.log("⬆ Kein Clip hat den Check bestanden – nichts hochgeladen.")
+        elif conf.get("approve", True):
+            for i, h in best:
+                h["pending"] = True
+                self.ui(lambda i=i: self._refresh_row(i))
+            self.ui(self.save_session)
+            self.log(f"⏳ {len(best)} Clip(s) warten auf deine Freigabe: auswählen → „▶ Ansehen“ → "
+                     "„✅ Freigeben & hochladen“ (oder 👎 wenn er schlecht ist).")
+            self.notify("⏳ Clips warten auf Freigabe",
+                        f"{len(best)} geprüfte Clips sind bereit. Öffne die App, schau sie dir an und gib sie frei.")
+        else:
+            self.log(f"⬆ Auto-Upload der besten {len(best)} geprüften Clips …")
+            if direct:
+                self._upload_job(src, best, plats)
+            else:
+                self.ui(lambda: self._queue_upload(src, best, plats))
+
+    def _queue_upload(self, src, items, plats):
+        if self.busy:
+            self.root.after(60 * 1000, lambda: self._queue_upload(src, items, plats))
+            return
+        self._work(self._upload_job, src, items, plats)
 
     # ----------------------------------------------------------------- Upload --
     def upload_selected(self):
@@ -1544,6 +1728,13 @@ class App:
         new = [v for v in vods if v["id"] not in seen]
         if not new:
             self.log("Auto-Modus: kein neuer Stream.")
+            return
+        if self.s.get("live"):
+            # Der Live-Clipper hat diese Streams schon live geclippt → nicht doppelt aus dem VOD clippen
+            self.s.setdefault("seen", []).extend(v["id"] for v in new)
+            self.s["seen"] = self.s["seen"][-100:]
+            self.save()
+            self.log(f"Auto-Modus: {len(new)} neues VOD – wurde schon vom Live-Clipper geclippt, überspringe.")
             return
         if core.is_live(st["channel"], self.runner):
             self.log("Auto-Modus: du bist gerade live – clippe, wenn der Stream vorbei ist.")

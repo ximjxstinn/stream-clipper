@@ -8,3 +8,4 @@ backup/
 _update/
 __pycache__/
 uploads.json
+twitch.json
