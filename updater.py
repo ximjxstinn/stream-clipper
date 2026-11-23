@@ -28,9 +28,28 @@ def _ver(v):
     return tuple(out + [0] * (3 - len(out)))
 
 
+API_SHA = "https://api.github.com/repos/ximjxstinn/stream-clipper/commits/main"
+
+
+def _latest_base():
+    """Raw-Adresse des neuesten Commits – nie veraltet (raw/main wird von GitHub ein paar Minuten gecacht)."""
+    try:
+        req = urllib.request.Request(API_SHA, headers={"User-Agent": "xImJxstinn-StreamClipper",
+                                                       "Accept": "application/vnd.github.sha"})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            sha = r.read().decode().strip()
+        if len(sha) == 40:
+            return REPO_RAW.replace("/main/", f"/{sha}/")
+    except Exception:
+        pass
+    return REPO_RAW
+
+
 def check(current):
     """Gibt das Update-Info-Dict zurück, wenn es eine neuere Version gibt, sonst None."""
-    info = json.loads(_get(REPO_RAW + "version.json").decode("utf-8"))
+    base = _latest_base()
+    info = json.loads(_get(base + "version.json").decode("utf-8"))
+    info["_base"] = base
     if _ver(info.get("version", "0")) > _ver(current):
         return info
     return None
@@ -46,7 +65,7 @@ def install(info, log=print):
     os.makedirs(tmp)
     for f in files:
         log(f"   ⬇ {f}")
-        data = _get(REPO_RAW + f, timeout=60)
+        data = _get(info.get("_base", REPO_RAW) + f, timeout=60)
         if not data:
             raise RuntimeError(f"{f} ist leer")
         if f.endswith((".py", ".pyw")):

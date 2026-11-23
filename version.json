@@ -1,6 +1,6 @@
 {
-  "version": "2.9",
-  "notes": "Fix: Eigene Aufnahmen – alle Tonspuren, kurze Aufnahmen, ruhige Aufnahmen finden jetzt Stellen",
+  "version": "2.9.1",
+  "notes": "Updater findet neue Versionen jetzt sofort",
   "files": [
     "StreamClipper.pyw",
     "clipper_core.py",
