@@ -1,6 +1,6 @@
 {
-  "version": "2.8",
-  "notes": "Neu: Eigene Aufnahme per Drag & Drop reinziehen – ersetzt die aktuelle Liste",
+  "version": "2.9",
+  "notes": "Fix: Eigene Aufnahmen – alle Tonspuren, kurze Aufnahmen, ruhige Aufnahmen finden jetzt Stellen",
   "files": [
     "StreamClipper.pyw",
     "clipper_core.py",

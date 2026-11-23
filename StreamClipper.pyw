@@ -23,7 +23,7 @@ except ImportError:  # Update von 2.1: alter Updater kannte uploader.py noch nic
     except Exception:
         uploader = None
 
-VERSION = "2.8"
+VERSION = "2.9"
 import sys
 SETTINGS_FILE = os.path.join(core.APP_DIR, "settings.json")
 SESSION_DIR = os.path.join(core.APP_DIR, "gespeichert")
@@ -874,6 +874,10 @@ class App:
             length = core.media_duration(src["path"], self.runner)
             loud = core.analyze_loudness(src["path"], work, self.runner, self.log, length)
             self.log("ℹ Bei eigenen Aufnahmen gibt's keinen Chat – es wird nur nach Lautstärke gesucht.")
+            if loud:
+                srt = sorted(loud)
+                self.log(f"   Aufnahme: {core.fmt_time(length or len(loud))} · Ton: leise {srt[len(srt)//10]:.0f} dB, "
+                         f"normal {srt[len(srt)//2]:.0f} dB, laut {srt[int(len(srt)*0.99)]:.0f} dB")
         if not msgs and not loud:
             raise RuntimeError("Keine Daten zum Analysieren (weder Chat noch Audio).")
         self.log("🧠 Suche die besten Stellen …")
@@ -917,6 +921,9 @@ class App:
             else:
                 h["motion"] = round(mean, 1)
                 keep.append(h)
+        if not keep and hl:
+            self.log("   ⚠ Die Bildanalyse hätte alles aussortiert – zeige dir die besten Stellen trotzdem.")
+            return hl[:want]
         if dropped:
             self.log(f"   → {dropped} Menü-Stelle(n) aussortiert und durch die nächstbesten ersetzt.")
         else:

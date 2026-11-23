@@ -338,7 +338,7 @@ def media_duration(path, runner):
 
 def analyze_loudness(media_path, workdir, runner, log, duration=None):
     """Lautstärke (RMS in dB) pro Sekunde über ffmpeg/astats."""
-    cache = os.path.join(workdir, "voice_v2.json")
+    cache = os.path.join(workdir, "voice_v3.json")
     if os.path.isfile(cache):
         log("✔ Lautstärke schon im Cache")
         with open(cache) as f:
@@ -358,11 +358,26 @@ def analyze_loudness(media_path, workdir, runner, log, duration=None):
                 last[0] = p
                 log(f"   Lautstärke: {min(p, 100)}%")
 
+    # Wie viele Tonspuren? (OBS nimmt Mikro oft auf einer eigenen Spur auf)
+    tracks = []
+    try:
+        runner.run([tool("ffprobe"), "-v", "error", "-select_streams", "a", "-show_entries", "stream=index",
+                    "-of", "csv=p=0", media_path], on_line=tracks.append)
+    except Exception:
+        tracks = ["0"]
+    n = len([t for t in tracks if t.strip()])
+    chain = (f"aresample={rate},highpass=f=250,lowpass=f=3400,asetnsamples={rate},astats=metadata=1:reset=1,"
+             f"ametadata=print:key=lavfi.astats.Overall.RMS_level:file={out_file}")
+    if n > 1:
+        log(f"   🎚 {n} Tonspuren gefunden – höre alle zusammen ab (damit dein Mikro sicher dabei ist)")
+        mix = "".join(f"[0:a:{k}]" for k in range(n)) + f"amix=inputs={n}:normalize=0,pan=mono|c0=c0,"
+        audio_args = ["-filter_complex", mix + chain]
+    else:
+        audio_args = ["-ac", "1", "-af", chain]
+    if n == 0:
+        raise RuntimeError("Die Aufnahme hat keine Tonspur.")
     runner.run([tool("ffmpeg"), "-hide_banner", "-nostats", "-loglevel", "error", "-progress", "pipe:1",
-                "-i", media_path, "-vn", "-ac", "1",
-                "-af", f"aresample={rate},highpass=f=250,lowpass=f=3400,asetnsamples={rate},astats=metadata=1:reset=1,"
-                       f"ametadata=print:key=lavfi.astats.Overall.RMS_level:file={out_file}",
-                "-f", "null", "-"], cwd=workdir, on_line=on_line)
+                "-i", media_path, "-vn", *audio_args, "-f", "null", "-"], cwd=workdir, on_line=on_line)
     db = parse_rms_file(os.path.join(workdir, out_file))
     with open(cache, "w") as f:
         json.dump(db, f)
@@ -595,11 +610,12 @@ def find_highlights(msgs=None, loudness=None, duration=None, *, count=10, pre=18
         if clip_bins[i]:
             combined[i] += 0.8 + 0.2 * min(clip_bins[i], 4)
 
-    skip_bins = int(skip_start // BIN)
+    long_rec = duration >= 15 * 60  # Anfang/Ende nur bei langen Streams abwerten
+    skip_bins = int(skip_start // BIN) if long_rec else 0
     for i in range(nb):
         if i < skip_bins:
             combined[i] = 0.0
-        elif i > nb - 24:  # letzte 2 Min = "bye chat"
+        elif long_rec and i > nb - 24:  # letzte 2 Min = "bye chat"
             combined[i] *= 0.3
 
     # --- Kandidaten (mit Mindestabstand) ----------------------------------------
@@ -611,6 +627,25 @@ def find_highlights(msgs=None, loudness=None, duration=None, *, count=10, pre=18
             break
         if all(abs(i - j) >= gap_bins for j in cands):
             cands.append(i)
+    weak = False
+    if len(cands) < min(3, count):
+        # Nichts Starkes gefunden → mildere Suche: relativ lauteste/aktivste Momente der Aufnahme
+        weak = True
+        soft = [0.0] * nb
+        for i in range(nb):
+            if i < skip_bins:
+                continue
+            a = max(0.0, voice_db[i]) / 12.0 if (has_audio and voice_db[i] is not None) else 0.0
+            soft[i] = combined[i] + 0.5 * a + 0.3 * (cn[i] if has_chat else 0.0)
+        soft = smooth(soft, 1)
+        for i in sorted(range(nb), key=lambda k: soft[k], reverse=True):
+            if soft[i] <= 0.02 or len(cands) >= count * 3:
+                break
+            if all(abs(i - j) >= gap_bins for j in cands):
+                cands.append(i)
+                combined[i] = max(combined[i], soft[i])
+        if cands:
+            log("ℹ Keine richtig lauten/hypen Stellen – nehme die relativ stärksten Momente (eher ruhige Aufnahme).")
     if not cands:
         return [], [(i * BIN, combined[i]) for i in range(nb)]
 
@@ -625,18 +660,18 @@ def find_highlights(msgs=None, loudness=None, duration=None, *, count=10, pre=18
     top = final[ranked[0]] or 1e-9
     # Lieber weniger, dafür gute Clips: schwache Kandidaten fliegen raus
     ref = final[ranked[min(2, len(ranked) - 1)]]  # dritt-bester als Maßstab, damit ein Mega-Moment nicht alles killt
-    chosen = [i for n, i in enumerate(ranked[:count]) if n < 3 or final[i] >= 0.45 * ref]
+    chosen = [i for n, i in enumerate(ranked[:count]) if weak or n < 3 or final[i] >= 0.45 * ref]
     if len(chosen) < len(ranked[:count]):
         log(f"ℹ Nur {len(chosen)} Stellen waren wirklich stark – den Rest lasse ich weg.")
 
     highlights = []
     for i in chosen:
         t = i * BIN + BIN / 2
-        chat_led = wc * cn[i] >= wa * an[i]
+        chat_led = has_chat and wc * cn[i] > 0 and wc * cn[i] >= wa * an[i]
         # Den eigentlichen Moment finden: Chat reagiert 5-20 s später (Stream-Delay + Reaktionszeit)
         if has_audio:
-            lo_s = int(max(0, t - 25)) if chat_led else int(i * BIN)
-            hi_s = int(t + 2) if chat_led else int(i * BIN + BIN)
+            lo_s = int(max(0, t - 25)) if chat_led else int(max(0, i * BIN - BIN))
+            hi_s = int(t + 2) if chat_led else int(i * BIN + 2 * BIN)
             window = [(loudness[s], s) for s in range(lo_s, min(hi_s, len(loudness)))]
             moment = max(window)[1] if window else t - 10
             if chat_led and window and max(window)[0] - (sum(w for w, _ in window) / len(window)) < 4:
@@ -670,7 +705,7 @@ def find_highlights(msgs=None, loudness=None, duration=None, *, count=10, pre=18
         highlights.append({
             "time": moment, "start": start, "end": end,
             "score": min(100, round(100 * final[i] / top)),
-            "reason": " · ".join(reasons) or "Spitze",
+            "reason": " · ".join(reasons) or ("relativ stärkster Moment" if weak else "Spitze"),
             "chat": sample, "features": feats[i],
         })
     curve = [(i * BIN, combined[i]) for i in range(nb)]
