@@ -84,9 +84,18 @@ class Twitch:
     def connected(self):
         return bool(self.c.get("refresh_token") and self.client_id)
 
-    def device_login(self, client_id, log, open_url, cancel=lambda: False):
+    def _secret(self, d):
+        """Vertrauliche Twitch-Apps brauchen das Client-Geheimnis, öffentliche nicht."""
+        sec = self.c.get("client_secret", "")
+        if sec:
+            d["client_secret"] = sec
+        return d
+
+    def device_login(self, client_id, log, open_url, cancel=lambda: False, client_secret=None):
         """Anmeldung per Gerätecode: Browser öffnet sich, du klickst nur auf 'Autorisieren'."""
         client_id = client_id.strip()
+        if client_secret is not None:
+            self.c["client_secret"] = client_secret.strip()
         if not client_id:
             raise LiveError("Bitte zuerst die Client-ID deiner Twitch-App eintragen.")
         st, d = _http("https://id.twitch.tv/oauth2/device", {"client_id": client_id, "scopes": SCOPES})
@@ -101,9 +110,9 @@ class Twitch:
             if cancel():
                 raise LiveError("Abgebrochen")
             time.sleep(interval)
-            st, t = _http("https://id.twitch.tv/oauth2/token", {
+            st, t = _http("https://id.twitch.tv/oauth2/token", self._secret({
                 "client_id": client_id, "scopes": SCOPES, "device_code": d["device_code"],
-                "grant_type": "urn:ietf:params:oauth:grant-type:device_code"})
+                "grant_type": "urn:ietf:params:oauth:grant-type:device_code"}))
             if st == 200 and t.get("access_token"):
                 self.c.update({"client_id": client_id, "access_token": t["access_token"],
                                "refresh_token": t.get("refresh_token", ""),
@@ -120,6 +129,9 @@ class Twitch:
             if "slow_down" in msg:
                 interval += 2
                 continue
+            if "secret" in msg.lower() or "invalid client" in msg.lower():
+                raise LiveError("Twitch will das Client-Geheimnis deiner App (Client-Typ 'Vertraulich'). "
+                                "Trag es im Fenster 'Mit Twitch verbinden' ein.")
             raise LiveError(f"Twitch-Anmeldung abgelehnt: {msg or t}")
         raise LiveError("Zeit für die Twitch-Anmeldung abgelaufen.")
 
@@ -129,9 +141,9 @@ class Twitch:
                 return self.c["access_token"]
             if not self.c.get("refresh_token"):
                 raise LiveError("Twitch ist nicht verbunden.")
-            st, t = _http("https://id.twitch.tv/oauth2/token", {
+            st, t = _http("https://id.twitch.tv/oauth2/token", self._secret({
                 "client_id": self.client_id, "grant_type": "refresh_token",
-                "refresh_token": self.c["refresh_token"]})
+                "refresh_token": self.c["refresh_token"]}))
             if st != 200 or not t.get("access_token"):
                 raise LiveError("Twitch-Anmeldung abgelaufen – bitte im Live-Clipper neu verbinden.")
             self.c.update({"access_token": t["access_token"],

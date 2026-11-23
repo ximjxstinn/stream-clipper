@@ -33,7 +33,7 @@ except ImportError:  # ältere Updater kennen live_clipper.py noch nicht → sel
     except Exception:
         live_clipper = None
 
-VERSION = "3.0"
+VERSION = "3.0.1"
 import sys
 SETTINGS_FILE = os.path.join(core.APP_DIR, "settings.json")
 SESSION_DIR = os.path.join(core.APP_DIR, "gespeichert")
@@ -640,6 +640,13 @@ class App:
         ttk.Label(f, text="Client-ID deiner Twitch-App:", style="Panel.TLabel").pack(anchor="w", pady=(12, 2))
         cid = tk.StringVar(value=c.get("client_id", ""))
         ttk.Entry(f, textvariable=cid, width=50).pack(fill="x")
+        ttk.Label(f, text="Client-Geheimnis (nur bei Client-Typ „Vertraulich“ nötig):",
+                  style="Panel.TLabel").pack(anchor="w", pady=(10, 2))
+        csec = tk.StringVar(value=c.get("client_secret", ""))
+        ttk.Entry(f, textvariable=csec, width=50, show="•").pack(fill="x")
+        ttk.Label(f, text="⚠ Bei einer App, die schon ein anderes Programm (z. B. dein Bot) nutzt, NICHT auf "
+                          "„Neues Geheimnis“ klicken – sonst geht das andere Programm nicht mehr. Nimm das "
+                          "Geheimnis, das du schon hast.", style="Muted.TLabel", wraplength=480).pack(anchor="w")
         ttk.Button(f, text="Twitch-App anlegen (dev.twitch.tv) …",
                    command=lambda: webbrowser.open("https://dev.twitch.tv/console/apps/create")).pack(anchor="w", pady=6)
         status = tk.StringVar(value=self._twitch_status())
@@ -651,7 +658,7 @@ class App:
 
             def job():
                 try:
-                    name = tw.device_login(cid.get(), self.log, webbrowser.open)
+                    name = tw.device_login(cid.get(), self.log, webbrowser.open, client_secret=csec.get())
                     self.log(f"✅ Twitch verbunden: {name}")
                     self.ui(lambda: (status.set(f"✅ verbunden als {name}"), self.v_tw_status.set(f"✅ {name}")))
                     if self.v_live.get():

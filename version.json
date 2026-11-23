@@ -1,6 +1,6 @@
 {
-  "version": "3.0",
-  "notes": "Neu: Live-Clipper – clippt automatisch während du live bist (auch PS5)",
+  "version": "3.0.1",
+  "notes": "Live-Clipper: funktioniert jetzt auch mit vertraulichen Twitch-Apps (Client-Geheimnis)",
   "files": [
     "StreamClipper.pyw",
     "clipper_core.py",
