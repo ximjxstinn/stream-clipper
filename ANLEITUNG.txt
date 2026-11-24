@@ -14,6 +14,14 @@ SO GEHT'S
   4. "Ausgewählte clippen" oder "Alle clippen"
   Oder einfach "Alles automatisch" = analysieren + alle Top-Clips schneiden.
 
+NEU IN 3.9
+  - 🏆 „Alle clippen“ und „Alles automatisch“ nehmen nur noch die BESTEN: nach Hype sortiert schneiden,
+    jeden Clip auf Spannung prüfen, Langweiliges sofort aussortieren (löschen) – bis „Anzahl Clips“
+    spannende Clips da sind. Rest = „nicht unter den besten“. („Ausgewählte clippen“ schneidet weiter genau deine Auswahl.)
+  - „Szenen-Erkennung im Bild“ und „Modus“ gelten jetzt auch für den Live-Clipper.
+  - 🔫 Schüsse nur noch bei echten Waffensounds: harter Knall mit Wumms UND Knall in den Höhen,
+    deutlich lauter als das Spiel. Schritte, Türen, Schläge, Klicken, Reden, Hupen zählen nicht mehr.
+
 NEU IN 3.8 – FERTIGE GTA-6-PROFILE
   Im Live-Clipper-Bereich bei „Profil“ jederzeit umschalten (gilt sofort, auch mitten im Stream):
   - 🎮 GTA 6 – Standard (empfohlen): alles Spannende, Stimme erst bei Schreien, max. 25 Clips/Std.

@@ -33,7 +33,7 @@ except ImportError:  # ältere Updater kennen live_clipper.py noch nicht → sel
     except Exception:
         live_clipper = None
 
-VERSION = "3.8"
+VERSION = "3.9"
 
 # Fertige Live-Profile für GTA 6 (jederzeit umschaltbar, gilt sofort – auch mitten im Stream)
 _ALL = ("siren", "shots", "explosion", "bluelight", "vision", "game", "voice", "chat", "clipreq")
@@ -352,10 +352,10 @@ class App:
             row=r, column=0, columnspan=3, sticky="w", pady=(4, 0))
         r += 1
         self.v_vis = tk.BooleanVar(value=s.get("vis", True))
-        ttk.Checkbutton(left, text="Szenen-Erkennung im Bild (Action, Verfolgungen, Kämpfe)",
+        ttk.Checkbutton(left, text="Szenen-Erkennung im Bild (Action, Verfolgungen, Kämpfe) – auch live",
                         variable=self.v_vis).grid(row=r, column=0, columnspan=3, sticky="w", pady=(2, 0))
         r += 1
-        ttk.Label(left, text="Modus", style="Panel.TLabel").grid(row=r, column=0, sticky="w", pady=2)
+        ttk.Label(left, text="Modus (auch live)", style="Panel.TLabel").grid(row=r, column=0, sticky="w", pady=2)
         self.v_mode = tk.StringVar(value=s.get("mode", MODES[1]))
         ttk.Combobox(left, textvariable=self.v_mode, values=MODES, state="readonly", width=22).grid(
             row=r, column=1, columnspan=2, sticky="we", pady=2)
@@ -414,12 +414,8 @@ class App:
         ttk.Label(left, textvariable=self.v_live_state, style="Muted.TLabel").grid(row=r, column=1, columnspan=2,
                                                                                     sticky="w")
         r += 1
-        ttk.Label(left, text="Empfindlichkeit", style="Panel.TLabel").grid(row=r, column=0, sticky="w", pady=2)
+        # Empfindlichkeit kommt jetzt aus „Modus“ oben (gilt für VOD + live)
         self.v_live_sens = tk.StringVar(value=s.get("live_sens", "Mittel"))
-        ttk.Combobox(left, textvariable=self.v_live_sens, state="readonly", width=22,
-                     values=list(live_clipper.SENSITIVITY) if live_clipper else ["Mittel"]).grid(
-            row=r, column=1, columnspan=2, sticky="we", pady=2)
-        r += 1
         ttk.Label(left, text="Clip-Länge (Sek.)", style="Panel.TLabel").grid(row=r, column=0, sticky="w", pady=2)
         self.v_live_len = tk.IntVar(value=s.get("live_len", 30))
         ttk.Spinbox(left, from_=10, to=60, textvariable=self.v_live_len, width=6).grid(row=r, column=2, sticky="e")
@@ -599,7 +595,8 @@ class App:
             "keywords": self.t_kw.get("1.0", "end").strip(), "outdir": self.v_out.get().strip() or DEFAULTS["outdir"],
             "auto": bool(self.v_auto.get()), "autostart": bool(self.v_autostart.get()),
             "autoupdate": bool(self.v_autoupdate.get()), "tray": bool(self.v_tray.get()),
-            "live": bool(self.v_live.get()), "live_sens": self.v_live_sens.get(),
+            "live": bool(self.v_live.get()),
+            "live_sens": ("Maximal (alles Spannende)" if self.v_mode.get().startswith("Maximal") else "Mittel"),
             "live_popup": bool(self.v_live_popup.get()), "live_voice": num(self.v_live_voice, 12), "live_len": num(self.v_live_len, 30),
         })
         self.save()
@@ -683,6 +680,10 @@ class App:
             return "⬆ hochgeladen (" + " + ".join({"yt": "YouTube", "tt": "TikTok"}[p] for p in up) + ")"
         qc = h.get("qc")
         th = h.get("thrill") or {}
+        if h.get("dropped"):
+            return f"🗑 aussortiert – langweilig ({th.get('score', 0)}/100)"
+        if h.get("skipped"):
+            return "– nicht unter den besten"
         if h.get("boring"):
             return f"💤 langweilig ({th.get('score', 0)}/100) – kein Upload"
         if qc and not qc.get("ok"):
@@ -1828,9 +1829,9 @@ class App:
                                                      "oder nimm \"Alle clippen\".")
             return
         st = self.settings()
-        self._work(self._clip_job, self.meta, [(i, self.highlights[i]) for i in idx], st)
+        self._work(self._clip_job, self.meta, [(i, self.highlights[i]) for i in idx], st, everything)
 
-    def _clip_job(self, src, items, st):
+    def _clip_job(self, src, items, st, best_only=False):
         core.ensure_tools(self.log, self.runner)
         date = datetime.date.today().strftime("%Y-%m-%d")
         folder = os.path.join(st["outdir"], f"{date}_{core.safe_name(src['title'])}")
@@ -1841,8 +1842,21 @@ class App:
         vstyle = VSTYLES.get(st["vstyle"], "blur")
         made_wide = []
         lines = [f"Highlights – {src['title']}", ""]
+        target = max(1, int(st.get("count", 10)))
+        if best_only:
+            # Nur die besten: nach Hype sortiert schneiden, langweilige aussortieren, bis genug spannende da sind
+            items = sorted(items, key=lambda x: -x[1]["score"])
+            self.log(f"🏆 Nur die besten: ich schneide nach Hype sortiert, sortiere Langweiliges aus und höre "
+                     f"bei {target} spannenden Clips auf.")
+        kept = []
         for n, (i, h) in enumerate(items, 1):
             self.runner.check()
+            if best_only and len(kept) >= target:
+                h["skipped"] = True
+                self.ui(lambda i=i: self._refresh_row(i))
+                continue
+            h.pop("skipped", None)
+            h.pop("dropped", None)
             name = f"{i + 1:02d}_{core.fmt_time(h['start'], '-')}_hype{h['score']}"
             base = os.path.join(folder, name)
             self.log(f"✂ Clip {n}/{len(items)}: {core.fmt_time(h['start'])} – {core.fmt_time(h['end'])}")
@@ -1876,6 +1890,19 @@ class App:
                              + ("" if keep else " → 💤 zu langweilig, kein Upload"))
                 except Exception as e:
                     self.log(f"   ⚠ Spannungs-Check ging nicht ({str(e)[:80]})")
+            if best_only and h.get("boring"):
+                for fp in (wide, tall):
+                    try:
+                        if fp and os.path.isfile(fp):
+                            os.remove(fp)
+                    except OSError:
+                        pass
+                made_wide = [x for x in made_wide if x[1] != wide]
+                h["files"], h["dropped"], h["clipped"] = {}, True, False
+                self.log("   🗑 aussortiert – nicht spannend genug")
+                self.ui(lambda i=i: self._refresh_row(i))
+                continue
+            kept.append((i, h))
             link = f"{core.vod_url(src['id'])}?t={core.twitch_t(h['start'])}" if src["kind"] == "vod" else ""
             lines.append(f"#{i + 1}  {core.fmt_time(h['start'])}  Hype {h['score']}  {h['reason']}  {link}")
             h["clipped"] = True
@@ -1891,9 +1918,14 @@ class App:
                     pass
         with open(os.path.join(folder, "highlights.txt"), "w", encoding="utf-8") as f:
             f.write("\n".join(lines) + "\n")
-        self.log(f"✅ Fertig! {len(items)} Clips gespeichert in: {folder}")
-        self.notify("✂ Clips fertig", f"{len(items)} Clips aus „{src.get('title', 'Stream')}“ sind fertig.")
-        self._auto_upload(src, items, direct=True)
+        dropped = len([1 for _, h in items if h.get("dropped")])
+        self.log(f"✅ Fertig! {len(kept)} Clips gespeichert in: {folder}"
+                 + (f" ({dropped} langweilige aussortiert)" if dropped else ""))
+        if best_only and not kept and dropped:
+            self.log("💤 Kein Clip war spannend genug. Tipp: „⚙ Live-Auslöser einstellen“ → Mindestpunktzahl "
+                     "niedriger stellen (z. B. 25).")
+        self.notify("✂ Clips fertig", f"{len(kept)} Clips aus „{src.get('title', 'Stream')}“ sind fertig.")
+        self._auto_upload(src, kept, direct=True)
         return folder
 
     def _auto_upload(self, src, items, direct=True, force=False):
@@ -1908,6 +1940,7 @@ class App:
         items = [x for x in items if not x[1].get("boring")]
         if boring:
             self.log(f"💤 {len(boring)} langweilige Clip(s) werden nicht hochgeladen.")
+        items = [x for x in items if x[1].get("files") and not x[1].get("dropped") and not x[1].get("skipped")]
         good = [x for x in items if (x[1].get("qc") or {}).get("ok", True) and not (x[1].get("uploaded") or {})]
         bad = len([x for x in items if not (x[1].get("qc") or {}).get("ok", True)])
         if bad:
@@ -2179,7 +2212,7 @@ class App:
 
     def _full_auto_job(self, src, st):
         src, hl = self._analyze_job(src, st)
-        self._clip_job(src, list(enumerate(hl)), st)
+        self._clip_job(src, list(enumerate(hl)), st, best_only=True)
 
     # ---------------------------------------------------------------- auto --
     def _toggle_auto(self):

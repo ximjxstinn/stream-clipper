@@ -614,7 +614,8 @@ def rate_clip(path, base_game=None, base_motion=None, min_shots=4):
         for st in range(0, max(1, len(blocks) - 39), 5):
             win = blocks[st:st + 40]
             local = _med([b[0] for b in win])
-            n = sum(b[2] for b in win if b[2] and b[0] - norm >= 8 and b[0] - local >= 6 and b[1] >= 2.0)
+            n = sum(b[2] for b in win if b[2] and b[0] - norm >= 12 and b[0] - local >= 8 and 2.0 <= b[1] <= 8.0
+                    and b[4] <= 10.0 and not (b[3][0] and b[3][1] >= 0.18))
             best_shots = max(best_shots, n)
         boom = False
         for i, b in enumerate(blocks[:-5]):
@@ -806,8 +807,11 @@ class Detector:
             local = self._median([v for _, v in g_recent]) if g_recent else norm10
             for t, v in g_recent:
                 h = hitd.get(round(t, 1), 0)
-                # Schuss = deutlich lauter als das normale Spiel UND als die letzten Sekunden (Reden ist gleichmäßig laut)
-                if h and v - norm10 >= 8 and v - local >= 6 and lows.get(round(t, 1), 0.0) >= 2.0:
+                # Waffe = harter Knall, deutlich lauter als Spiel UND letzte Sekunden, mit Wumms (Tiefbass)
+                # UND Knall-Anteil in den Höhen (nur dumpfes Wummern = Schritte/Türen/Schläge) und ohne Tonhöhe. Tür, Schritte, Klicken, Reden, Hupe, Musik zählen nicht.
+                kt = round(t, 1)
+                if (h and v - norm10 >= 12 and v - local >= 8 and 2.0 <= lows.get(kt, 0.0) <= 8.0
+                        and (not subd or subd.get(kt, 99.0) <= 10.0) and toned.get(kt, 0.0) < 0.18):
                     shots += h
                     blocks += 1
             if blocks < 2:
@@ -1037,12 +1041,18 @@ class LiveClipper:
             v = self.st.get("live_voice")
             if v is not None:
                 det.t_voice = float(v) if float(v) > 0 else 999.0
+            det.enabled = {k: True for k in TRIGGERS}
             det.enabled.update(self.st.get("live_trig") or {})
             det.t_action = float(self.st.get("live_game", det.t_action))
             det.t_vis = float(self.st.get("live_vis", det.t_vis))
             det.cooldown = max(20, int(self.st.get("live_gap", det.cooldown)))
             det.max_per_hour = max(1, int(self.st.get("live_hour", 999)))
             det.min_shots = max(2, int(self.st.get("live_shots", 4)))
+            # „Modus“ + „Szenen-Erkennung im Bild“ aus dem Hauptfenster gelten auch live
+            sens = SENSITIVITY.get(self.st.get("live_sens", "Mittel"), SENSITIVITY["Mittel"])
+            det.t_chat, det.min_people = sens[0], sens[3]
+            if not self.st.get("vis", True):
+                det.enabled["vision"] = det.enabled["bluelight"] = False
             trig = det.tick(time.time())
             if time.time() >= next_report:
                 next_report = time.time() + 60

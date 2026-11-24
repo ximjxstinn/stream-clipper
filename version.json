@@ -1,6 +1,6 @@
 {
-  "version": "3.8",
-  "notes": "Fertige GTA-6-Profile (Standard, Polizei, Überfall, Nur Krasses, Chillen) + eigene Profile speichern",
+  "version": "3.9",
+  "notes": "Nur die besten Clips bei Alle clippen/Alles automatisch, Modus + Szenen-Erkennung auch live, Schüsse nur bei echten Waffensounds",
   "files": [
     "StreamClipper.pyw",
     "clipper_core.py",
