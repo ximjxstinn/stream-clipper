@@ -14,6 +14,15 @@ SO GEHT'S
   4. "Ausgewählte clippen" oder "Alle clippen"
   Oder einfach "Alles automatisch" = analysieren + alle Top-Clips schneiden.
 
+NEU IN 4.2 – 🎮 CLIPS OHNE STREAM (PS REMOTE PLAY + OBS)
+  - Haken „🎮 Auch ohne Stream clippen (PS Remote Play + OBS)“: Sobald das PS-Remote-Play-Fenster offen ist
+    (und du NICHT live bist), schaut die App das Fenster mit – Cops (Minimap), Explosionen, Blaulicht.
+  - Bei einem Treffer lässt die App OBS den Wiederholungspuffer speichern (die letzten ~40 s mit Ton)
+    und verschiebt den Clip nach „Videos\Stream Clips\<Datum>_PS5_RemotePlay“ (+ TikTok-Version).
+  - Einmalig einrichten: Button „OBS …“ – dort steht Schritt für Schritt, was in OBS an muss.
+  - Wichtig: Remote-Play-Fenster nicht minimieren und nicht verdecken; OBS muss laufen.
+  - Das Auto-Profil gilt hier genauso.
+
 NEU IN 4.1 – 🤖 AUTOMATISCHES PROFIL
   - Profil „🤖 GTA 6 – Automatisch“ (jetzt Standard): stellt sich während des Streams selbst um.
     · 💰 Action-Modus: Cops oder Explosion in den letzten 3 Min. → viele Clips (40 s Abstand, 6 pro Verfolgung, Schüsse ab 3)

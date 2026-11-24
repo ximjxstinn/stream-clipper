@@ -1,6 +1,6 @@
 {
-  "version": "4.1",
-  "notes": "Automatisches Profil: stellt sich je nach Spielgeschehen selbst um (Action/Normal/Ruhig)",
+  "version": "4.2",
+  "notes": "Clips ohne Stream: PS Remote Play mitschauen, OBS speichert die Clips",
   "files": [
     "StreamClipper.pyw",
     "clipper_core.py",

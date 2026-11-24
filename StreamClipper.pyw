@@ -33,7 +33,7 @@ except ImportError:  # ältere Updater kennen live_clipper.py noch nicht → sel
     except Exception:
         live_clipper = None
 
-VERSION = "4.1"
+VERSION = "4.2"
 
 # Fertige Live-Profile für GTA 6 (jederzeit umschaltbar, gilt sofort – auch mitten im Stream)
 _ALL = ("cops", "siren", "shots", "explosion", "bluelight", "vision", "game", "voice", "chat", "clipreq")
@@ -104,7 +104,7 @@ DEFAULTS = {
     "w_chat": 65, "audio": True, "fmt": FORMATS[2], "vstyle": "Blur-Hintergrund", "quality": "1080p",
     "bestof": False, "nomenu": True, "vis": True, "mode": "Maximal (alles Spannende)", "live_times": [], "keywords": core.DEFAULT_KEYWORDS,
     "outdir": os.path.join(os.path.expanduser("~"), "Videos", "Stream Clips"),
-    "auto": False, "seen": [], "autostart": False, "autoupdate": True, "last_session": "", "tray": True, "tray_hint_shown": False, "live_popup": True, "live_voice": 12, "live_trig": {}, "live_game": 6, "live_vis": 1.6, "live_gap": 60, "live_hour": 30, "live_shots": 4, "live_chase": 3, "live_rate": True, "live_rate_min": 35, "live_drop": "keep", "live_auto": "approve", "live_profile": "", "live_profiles": {}, "live": False, "live_sens": "Maximal (alles Spannende)", "live_len": 30, "live_max": 100, "win_zoomed": True, "win_geo": "",
+    "auto": False, "seen": [], "autostart": False, "autoupdate": True, "last_session": "", "tray": True, "tray_hint_shown": False, "live_popup": True, "live_voice": 12, "live_trig": {}, "live_game": 6, "live_vis": 1.6, "live_gap": 60, "live_hour": 30, "live_shots": 4, "live_chase": 3, "rp": False, "obs_port": 4455, "obs_pw": "", "rp_post": 8, "live_rate": True, "live_rate_min": 35, "live_drop": "keep", "live_auto": "approve", "live_profile": "", "live_profiles": {}, "live": False, "live_sens": "Maximal (alles Spannende)", "live_len": 30, "live_max": 100, "win_zoomed": True, "win_geo": "",
 }
 
 
@@ -202,8 +202,11 @@ class App:
         if self.s.get("autoupdate", True):
             self.root.after(2500, lambda: self.check_updates(silent=True))
         self.live = None
+        self.rp = None
         if self.s.get("live"):
             self.root.after(4000, self._toggle_live)
+        if self.s.get("rp"):
+            self.root.after(5000, self._toggle_rp)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close_button)
         self.tray = None
         self.root.bind("<Unmap>", self._on_unmap)
@@ -468,6 +471,15 @@ class App:
         ttk.Button(left, text="⚙ Live-Auslöser einstellen (was & wie oft) …", command=self.live_trigger_settings).grid(
             row=r, column=0, columnspan=3, sticky="we", pady=(4, 2))
         r += 1
+        self.v_rp = tk.BooleanVar(value=s.get("rp", False))
+        ttk.Checkbutton(left, text="🎮 Auch ohne Stream clippen (PS Remote Play + OBS)", variable=self.v_rp,
+                        command=self._toggle_rp).grid(row=r, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        ttk.Button(left, text="OBS …", command=self.obs_settings).grid(row=r, column=2, sticky="e", pady=(4, 0))
+        r += 1
+        self.v_rp_state = tk.StringVar(value="aus")
+        ttk.Label(left, textvariable=self.v_rp_state, style="Muted.TLabel").grid(row=r, column=0, columnspan=3,
+                                                                                 sticky="w")
+        r += 1
         self.v_live_popup = tk.BooleanVar(value=s.get("live_popup", True))
         ttk.Checkbutton(left, text="Vorschau-Popup bei jedem neuen Live-Clip", variable=self.v_live_popup,
                         command=self.settings).grid(row=r, column=0, columnspan=3, sticky="w")
@@ -622,13 +634,15 @@ class App:
             "keywords": self.t_kw.get("1.0", "end").strip(), "outdir": self.v_out.get().strip() or DEFAULTS["outdir"],
             "auto": bool(self.v_auto.get()), "autostart": bool(self.v_autostart.get()),
             "autoupdate": bool(self.v_autoupdate.get()), "tray": bool(self.v_tray.get()),
-            "live": bool(self.v_live.get()),
+            "live": bool(self.v_live.get()), "rp": bool(self.v_rp.get()),
             "live_sens": ("Maximal (alles Spannende)" if self.v_mode.get().startswith("Maximal") else "Mittel"),
             "live_popup": bool(self.v_live_popup.get()), "live_voice": num(self.v_live_voice, 12), "live_len": num(self.v_live_len, 30),
         })
         self.save()
         if getattr(self, "live", None):
             self.live.st.update(self._live_settings())
+        if getattr(self, "rp", None):
+            self.rp.st.update(self._live_settings())
         if hasattr(self, "v_live_profile"):
             self._mark_custom()
         return dict(s)
@@ -1019,6 +1033,104 @@ class App:
         ttk.Button(bf, text="⭐ Als Profil speichern …", command=save_as).pack(side="left", padx=6)
         ttk.Button(bf, text="Speichern (gilt sofort)", style="Accent.TButton", command=save).pack(side="right")
 
+    def _toggle_rp(self):
+        on = bool(self.v_rp.get())
+        self.settings()
+        if self.rp:
+            self.rp.stop()
+            self.rp = None
+        if not on:
+            self.v_rp_state.set("aus")
+            return
+        if not live_clipper or not hasattr(live_clipper, "RemotePlayClipper"):
+            self.log("❌ live_clipper.py zu alt – bitte „Nach Updates suchen“.")
+            return
+        if os.name != "nt":
+            self.v_rp_state.set("geht nur unter Windows")
+            return
+        if not self.s.get("obs_pw") and not self.s.get("obs_ok"):
+            self.obs_settings()
+
+        def start():
+            self.rp = live_clipper.RemotePlayClipper(
+                self._live_settings(), self.log,
+                on_clip=lambda stream, h: self.ui(lambda: self._add_live_clip(stream, h)),
+                on_state=lambda txt: self.ui(lambda: self.v_rp_state.set(txt)),
+                notify=self.notify,
+                is_live=lambda: bool(self.live and self.live.stream_stop))
+            self.rp.on_end = lambda stream: self.ui(lambda: self._live_stream_ended(stream))
+            self.rp.start()
+
+        def threaded_ensure():
+            try:
+                core.ensure_tools(self.log, core.Runner(self.log))
+            except Exception as e:
+                self.log(f"⚠ Tools: {e}")
+            self.ui(start)
+        threading.Thread(target=threaded_ensure, daemon=True).start()
+
+    def obs_settings(self):
+        win = tk.Toplevel(self.root)
+        win.title("OBS für Remote-Play-Clips")
+        win.configure(bg=BG)
+        win.transient(self.root)
+        f = ttk.Frame(win, style="Panel.TFrame", padding=16)
+        f.pack(fill="both", expand=True, padx=12, pady=12)
+        steps = ("So geht's (einmalig):\n"
+                 "1. In OBS eine Quelle „Fensteraufnahme“ → Fenster „PS Remote Play“ (Ton: „Audio von Fenster aufnehmen“).\n"
+                 "2. OBS → Einstellungen → Ausgabe → Wiederholungspuffer: „aktivieren“, Max. Zeit 40 Sek.\n"
+                 "3. OBS → Werkzeuge → WebSocket-Servereinstellungen → „WebSocket-Server aktivieren“,\n"
+                 "   dann „Verbindungsinformationen anzeigen“ → Passwort hier einfügen.\n"
+                 "4. Beim Spielen: OBS offen lassen, Remote-Play-Fenster nicht minimieren.\n"
+                 "   Die App schaut das Fenster mit und lässt OBS bei Cops/Explosionen den Clip speichern.")
+        ttk.Label(f, text=steps, style="Panel.TLabel", justify="left").grid(row=0, column=0, columnspan=3,
+                                                                           sticky="w", pady=(0, 10))
+        v_port = tk.IntVar(value=int(self.s.get("obs_port", 4455)))
+        v_pw = tk.StringVar(value=self.s.get("obs_pw", ""))
+        v_post = tk.IntVar(value=int(self.s.get("rp_post", 8)))
+        ttk.Label(f, text="Port", style="Panel.TLabel").grid(row=1, column=0, sticky="w")
+        ttk.Entry(f, textvariable=v_port, width=8).grid(row=1, column=1, sticky="w", padx=8)
+        ttk.Label(f, text="Passwort", style="Panel.TLabel").grid(row=2, column=0, sticky="w", pady=4)
+        ttk.Entry(f, textvariable=v_pw, width=30, show="•").grid(row=2, column=1, columnspan=2, sticky="w", padx=8)
+        ttk.Label(f, text="Sek. nach dem Moment warten", style="Panel.TLabel").grid(row=3, column=0, sticky="w")
+        ttk.Spinbox(f, from_=0, to=20, textvariable=v_post, width=6).grid(row=3, column=1, sticky="w", padx=8)
+        v_res = tk.StringVar(value="")
+        ttk.Label(f, textvariable=v_res, style="Muted.TLabel", wraplength=480).grid(row=5, column=0, columnspan=3,
+                                                                                   sticky="w", pady=(8, 0))
+
+        def store():
+            try:
+                self.s["obs_port"] = int(v_port.get())
+            except Exception:
+                self.s["obs_port"] = 4455
+            self.s["obs_pw"] = v_pw.get().strip()
+            try:
+                self.s["rp_post"] = int(v_post.get())
+            except Exception:
+                self.s["rp_post"] = 8
+            self.save()
+            if self.rp:
+                self.rp.st.update(self._live_settings())
+
+        def test():
+            store()
+            v_res.set("teste …")
+
+            def run():
+                ok, txt = live_clipper.obs_check(self.s["obs_port"], self.s["obs_pw"])
+                if ok:
+                    self.s["obs_ok"] = True
+                    self.save()
+                win_ = live_clipper.find_window()
+                txt += " · Remote Play: " + ("✅ Fenster gefunden" if win_ else "Fenster nicht offen")
+                self.ui(lambda: v_res.set(("✅ " if ok else "❌ ") + txt))
+            threading.Thread(target=run, daemon=True).start()
+        bf = ttk.Frame(f, style="Panel.TFrame")
+        bf.grid(row=4, column=0, columnspan=3, sticky="we", pady=(10, 0))
+        ttk.Button(bf, text="🔌 Verbindung testen", command=test).pack(side="left")
+        ttk.Button(bf, text="Speichern", style="Accent.TButton", command=lambda: (store(), win.destroy())).pack(
+            side="right")
+
     def _toggle_live(self):
         on = bool(self.v_live.get())
         self.settings()
@@ -1300,6 +1412,8 @@ class App:
         self.save_session()
         if self.live:
             self.live.stop()
+        if self.rp:
+            self.rp.stop()
         if self.runner:
             self.runner.cancel()
         if self.tray:
