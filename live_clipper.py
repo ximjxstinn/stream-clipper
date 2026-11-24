@@ -29,10 +29,12 @@ HELIX = "https://api.twitch.tv/helix"
 SCOPES = "clips:edit"
 IS_WIN = os.name == "nt"
 
-SENSITIVITY = {  # (Chat-Score, Stimme +dB über normal)
-    "Hoch (mehr Clips)": (2.5, 8.0),
-    "Mittel": (4.0, 10.0),
-    "Niedrig (nur große Momente)": (6.0, 13.0),
+MAXIMAL = "Maximal (alles Spannende)"
+SENSITIVITY = {  # (Chat-Score, Stimme +dB, Spiel-Action +LU, min. Leute im Chat)
+    MAXIMAL: (1.5, 6.0, 6.0, 2),
+    "Hoch (mehr Clips)": (2.5, 8.0, 9.0, 3),
+    "Mittel": (4.0, 10.0, 12.0, 3),
+    "Niedrig (nur große Momente)": (6.0, 13.0, 99.0, 3),
 }
 
 
@@ -264,24 +266,30 @@ class AudioReader(threading.Thread):
                 url = out.stdout.strip().splitlines()[-1] if out.stdout.strip() else ""
                 if not url.startswith("http"):
                     raise RuntimeError("keine Live-Audiospur")
-                chain = ("aresample=8000,highpass=f=250,lowpass=f=3400,asetnsamples=8000,"
-                         "astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level:file=-")
+                # Kette 1: deine Stimme (Sprach-Frequenzen) · Kette 2: Spiel-Lautstärke (Action, Sirenen, Schüsse)
+                graph = ("[0:a]aformat=channel_layouts=mono,asplit=2[v][g];"
+                         "[v]aresample=8000,highpass=f=250,lowpass=f=3400,asetnsamples=8000,"
+                         "astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level:file=-[vo];"
+                         "[g]aresample=48000,ebur128=metadata=1,ametadata=print:key=lavfi.r128.M:file=-[go]")
                 self.proc = subprocess.Popen([core.tool("ffmpeg"), "-hide_banner", "-loglevel", "error", "-nostats",
-                                              "-i", url, "-vn", "-ac", "1", "-af", chain, "-f", "null", "-"],
+                                              "-i", url, "-vn", "-filter_complex", graph,
+                                              "-map", "[vo]", "-f", "null", "-", "-map", "[go]", "-f", "null", "-"],
                                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                              stdin=subprocess.DEVNULL, **kw)
                 for raw in iter(self.proc.stdout.readline, b""):
                     if self.stop.is_set():
                         break
                     line = raw.decode("utf-8", "replace")
-                    if "RMS_level=" in line:
-                        try:
-                            v = float(line.split("=", 1)[1])
-                        except ValueError:
-                            v = -90.0
-                        if math.isinf(v) or math.isnan(v):
-                            v = -90.0
-                        self.on_db(time.time(), max(-90.0, v))
+                    kind = "voice" if "RMS_level=" in line else ("game" if "r128.M=" in line else None)
+                    if not kind:
+                        continue
+                    try:
+                        v = float(line.split("=", 1)[1])
+                    except ValueError:
+                        v = -90.0
+                    if math.isinf(v) or math.isnan(v):
+                        v = -90.0
+                    self.on_db(time.time(), max(-90.0, v), kind)
                 self.kill()
             except Exception as e:
                 if not self.stop.is_set():
@@ -309,7 +317,9 @@ class Detector:
     def __init__(self, streamer, keywords, sensitivity="Mittel", cooldown=45, warmup=120):
         self.streamer = streamer.lower()
         self.kws = core.parse_keywords(keywords)
-        self.t_chat, self.t_voice = SENSITIVITY.get(sensitivity, SENSITIVITY["Mittel"])
+        self.t_chat, self.t_voice, self.t_action, self.min_people = SENSITIVITY.get(sensitivity,
+                                                                                     SENSITIVITY["Mittel"])
+        self.game = deque(maxlen=4000)    # (t, LUFS) ~10x pro Sekunde
         self.cooldown, self.warmup = cooldown, warmup
         self.msgs = deque()       # (t, user, text, keyword-hits)
         self.clipreq = deque()    # (t, user)
@@ -330,9 +340,9 @@ class Detector:
                 return
             self.msgs.append((t, user, text, core.count_keywords(text, self.kws)))
 
-    def add_db(self, t, v):
+    def add_db(self, t, v, kind="voice"):
         with self.lock:
-            self.db.append((t, v))
+            (self.game if kind == "game" else self.db).append((t, v))
 
     @staticmethod
     def _median(vals):
@@ -356,12 +366,13 @@ class Detector:
             kw = sum(m[3] for m in recent)
             req_users = {u for t, u in self.clipreq if t >= now - 12}
             dbs = list(self.db)
+            game = list(self.game)
         u15 = len(users)
         self.u_hist.append(u15)
         base = self._median(self.u_hist)
         mean = sum(self.u_hist) / len(self.u_hist)
         chat_score = 0.0
-        if u15 >= max(3, 2.5 * mean) and u15 >= 2 * base + 1:
+        if u15 >= max(self.min_people, 2.5 * mean) and u15 >= 2 * base + 1:
             chat_score = (u15 - base) / math.sqrt(base + 2)
         voice_diff = None
         if len(dbs) >= 60:
@@ -369,6 +380,16 @@ class Detector:
             last2 = [v for t, v in dbs if t >= now - 3][-2:]
             if len(last2) == 2:
                 voice_diff = min(last2) - norm
+        action = None
+        if len(game) >= 600:  # ~1 Minute Spielton als Vergleich
+            per_sec = {}
+            for t, v in game:
+                k = int(t)
+                per_sec[k] = max(per_sec.get(k, -90.0), v)
+            norm_g = self._median(list(per_sec.values()))
+            last3 = [per_sec[k] for k in range(int(now) - 3, int(now)) if k in per_sec]
+            if len(last3) >= 3 and norm_g > -70:
+                action = min(last3) - norm_g
         feats = [min(chat_score / 4.0, 3.0), min((kw / max(1, u15)) / 0.5, 2.0),
                  min(max(0.0, (voice_diff or 0) - 4.0) / 8.0, 3.0), min(u15 / max(1.0, mean) / 4.0, 2.0)]
         if now - self.last_clip < self.cooldown:
@@ -378,19 +399,25 @@ class Detector:
             kind = "clip"
             reasons.append(f"✂ {', '.join(sorted(req_users))[:40]} wollte das clippen")
         warm = now - self.start >= self.warmup
+        if u15 < 5 and kw < 2:
+            chat_score = 0.0  # bei kleinem Chat nur mit echten Reaktionen (KEKW, Cops, 💀 …)
         if warm and chat_score >= self.t_chat:
             kind = kind or "chat"
             reasons.append(f"{u15} Leute im Chat" + (f" · {kw}× Hype-Wörter" if kw else ""))
         if warm and voice_diff is not None and voice_diff >= self.t_voice:
             kind = kind or "voice"
             reasons.append(f"Stimme +{voice_diff:.0f} dB")
+        if warm and action is not None and action >= self.t_action:
+            kind = kind or "action"
+            reasons.append(f"🎮 Action im Spiel (+{action:.0f} LU)")
         if not kind:
             return None
         self.last_clip = now
         with self.lock:
             self.clipreq.clear()
         sample = core._top_messages([m[2] for m in recent])
-        score = min(100, int(20 * chat_score + 6 * max(0.0, (voice_diff or 0)) + (40 if req_users else 0)))
+        score = min(100, int(20 * chat_score + 6 * max(0.0, (voice_diff or 0)) + 4 * max(0.0, (action or 0))
+                             + (40 if req_users else 0)))
         return {"kind": kind, "reason": " · ".join(reasons), "chat": sample, "features": feats,
                 "score": max(score, 30), "t": now}
 
@@ -455,8 +482,11 @@ class LiveClipper:
         self.log(f"🔴 LIVE erkannt: „{s.get('title', '')}“ ({s.get('game_name', '')}) – clippe automatisch mit.")
         self.notify("🔴 Live-Clipper läuft", "Du bist live – ich clippe deine Hype-Momente automatisch.")
         self.on_state("🔴 LIVE – 0 Clips")
-        det = Detector(channel, self.st.get("keywords", core.DEFAULT_KEYWORDS), self.st.get("live_sens", "Mittel"),
-                       cooldown=max(30, int(self.st.get("live_len", 30)) + 10))
+        sens = self.st.get("live_sens", "Mittel")
+        length = int(self.st.get("live_len", 30))
+        det = Detector(channel, self.st.get("keywords", core.DEFAULT_KEYWORDS), sens,
+                       cooldown=(length + 2) if sens == MAXIMAL else max(30, length + 10),
+                       warmup=60 if sens == MAXIMAL else 120)
         ChatReader(channel, det.add_msg, self.stream_stop, self.log).start()
         if self.st.get("audio", True):
             AudioReader(channel, det.add_db, self.stream_stop, self.log).start()
@@ -487,7 +517,7 @@ class LiveClipper:
 
     def _make_clip(self, trig, uid):
         try:
-            if trig["kind"] == "voice":
+            if trig["kind"] in ("voice", "action"):
                 time.sleep(6)  # deine Reaktion noch mit drauf
             length = int(self.st.get("live_len", 30))
             self.count += 1

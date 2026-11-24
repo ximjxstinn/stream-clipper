@@ -33,7 +33,7 @@ except ImportError:  # ältere Updater kennen live_clipper.py noch nicht → sel
     except Exception:
         live_clipper = None
 
-VERSION = "3.0.1"
+VERSION = "3.1"
 import sys
 SETTINGS_FILE = os.path.join(core.APP_DIR, "settings.json")
 SESSION_DIR = os.path.join(core.APP_DIR, "gespeichert")
@@ -57,7 +57,7 @@ DEFAULTS = {
     "w_chat": 65, "audio": True, "fmt": FORMATS[2], "vstyle": "Blur-Hintergrund", "quality": "1080p",
     "bestof": False, "nomenu": True, "keywords": core.DEFAULT_KEYWORDS,
     "outdir": os.path.join(os.path.expanduser("~"), "Videos", "Stream Clips"),
-    "auto": False, "seen": [], "autostart": False, "autoupdate": True, "last_session": "", "tray": True, "tray_hint_shown": False, "live": False, "live_sens": "Mittel", "live_len": 30, "live_max": 25, "win_zoomed": True, "win_geo": "",
+    "auto": False, "seen": [], "autostart": False, "autoupdate": True, "last_session": "", "tray": True, "tray_hint_shown": False, "live": False, "live_sens": "Maximal (alles Spannende)", "live_len": 30, "live_max": 100, "win_zoomed": True, "win_geo": "",
 }
 
 
@@ -75,6 +75,16 @@ class App:
     def __init__(self, root):
         self.root = root
         self.s = load_settings()
+        if not self.s.get("mig_31"):
+            # Einmalig: Live-Clipper auf "so viel wie möglich" + GTA-Wörter (Cops, Autos klauen …)
+            self.s["live_sens"] = "Maximal (alles Spannende)"
+            self.s["live_max"] = 100
+            kw = core.parse_keywords(self.s.get("keywords", ""))
+            extra = [k for k in core.parse_keywords(core.GTA_KEYWORDS) if k not in kw]
+            if extra:
+                self.s["keywords"] = (self.s.get("keywords", "").rstrip(", ") + ", " + ", ".join(extra)).strip(", ")
+            self.s["mig_31"] = True
+            self.save()
         self.q = queue.Queue()
         self.runner = None
         self.busy = False

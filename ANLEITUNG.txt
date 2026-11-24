@@ -14,6 +14,14 @@ SO GEHT'S
   4. "Ausgewählte clippen" oder "Alle clippen"
   Oder einfach "Alles automatisch" = analysieren + alle Top-Clips schneiden.
 
+NEU IN 3.1
+  - Live-Clipper Empfindlichkeit "Maximal (alles Spannende)" (ist jetzt eingestellt): clippt so viel
+    wie möglich – auch wenn nur 2-3 Leute im Chat reagieren und wenn das SPIEL plötzlich laut wird
+    (Polizei/Sirenen, Verfolgungsjagd, Crash, Schüsse, Explosionen) – auch ohne dass du redest.
+  - Hype-Wörter um GTA ergänzt: cops, polizei, wanted, flucht, crash, geklaut, wasted, 💀, 😂 …
+  - Bis zu 100 Live-Clips pro Stream, alle ~30 s ein Clip möglich.
+  - Fix: "Permission denied" bei ffmpeg.exe (Tool war gerade in Benutzung).
+
 NEU IN 3.0 – LIVE-CLIPPER (auch für PS5-Streams)
   - Haken "Während ich live bin automatisch Twitch-Clips machen" setzen und App laufen lassen.
   - Sobald du live gehst (egal ob PC oder PS5), liest die App deinen Chat mit und hört deinen

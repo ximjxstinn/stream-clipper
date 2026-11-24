@@ -32,6 +32,8 @@ DEFAULT_KEYWORDS = (
     "pog, poggers, pogchamp, letsgo, lets go, let's go, clip, clip it, !clip, ???, "
     "wtf, holy, omg, krass, digga, alter, nein, ehrenlos, ehre, gg, sheesh, hä"
 )
+GTA_KEYWORDS = ("cops, polizei, bullen, wanted, sterne, flucht, verfolgung, crash, unfall, geklaut, klauen, "
+                "auto, wasted, busted, explosion, boom, 💀, 😂, 😭, 🔥")
 
 
 class Cancelled(Exception):
@@ -147,7 +149,22 @@ def _download(url, dest, log, runner, label):
                     if pct >= last + 10:
                         last = pct
                         log(f"   {label}: {pct}%")
-    os.replace(dest + ".part", dest)
+    _safe_replace(dest + ".part", dest, log)
+
+
+def _safe_replace(src, dest, log):
+    """Ersetzt eine Datei. Ist die alte gerade in Benutzung (Windows sperrt laufende .exe), bleibt sie."""
+    try:
+        os.replace(src, dest)
+    except PermissionError:
+        try:
+            os.remove(src)
+        except OSError:
+            pass
+        if os.path.isfile(dest):
+            log(f"   ℹ {os.path.basename(dest)} wird gerade benutzt – behalte die vorhandene Version.")
+        else:
+            raise
 
 
 def _extract(zip_path, wanted, log):
@@ -155,13 +172,24 @@ def _extract(zip_path, wanted, log):
         for info in z.infolist():
             base = os.path.basename(info.filename)
             if base.lower() in wanted:
-                with z.open(info) as src, open(os.path.join(TOOLS_DIR, base), "wb") as dst:
+                target = os.path.join(TOOLS_DIR, base)
+                with z.open(info) as src, open(target + ".new", "wb") as dst:
                     shutil.copyfileobj(src, dst)
-                log(f"   {base} entpackt")
+                _safe_replace(target + ".new", target, log)
+                log(f"   {base} bereit")
     os.remove(zip_path)
 
 
+_TOOLS_LOCK = threading.Lock()
+
+
 def ensure_tools(log, runner, force=False):
+    # nur EIN Download gleichzeitig (Live-Clipper + Analyse wollten sonst parallel dieselbe Datei schreiben)
+    with _TOOLS_LOCK:
+        _ensure_tools(log, runner, force)
+
+
+def _ensure_tools(log, runner, force=False):
     os.makedirs(TOOLS_DIR, exist_ok=True)
     if force or not tool("yt-dlp"):
         log("⬇ Lade yt-dlp …")
