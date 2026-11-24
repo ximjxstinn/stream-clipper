@@ -1,6 +1,6 @@
 {
-  "version": "3.3.2",
-  "notes": "Live-Clipper empfindlicher + Messwerte im Log; Mausrad verstellt keine Felder mehr",
+  "version": "3.4",
+  "notes": "Live: echte Sirenen- und Blaulicht-Erkennung, Action im Bild, Sofort-Clips, Live-Ton repariert",
   "files": [
     "StreamClipper.pyw",
     "clipper_core.py",

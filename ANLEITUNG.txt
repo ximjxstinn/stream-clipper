@@ -14,6 +14,16 @@ SO GEHT'S
   4. "Ausgewählte clippen" oder "Alle clippen"
   Oder einfach "Alles automatisch" = analysieren + alle Top-Clips schneiden.
 
+NEU IN 3.4 – LIVE-CLIPPER ERKENNT JETZT ECHT
+  - 🚨 Sirenen-Erkennung: sucht das typische Auf-und-Ab-Heulen (langsam und schnell) im Spielton –
+    auch wenn die Sirene leise im Hintergrund ist. Musik und Sprache lösen nicht aus.
+  - 🚨 Blaulicht-Erkennung: schaut live ins Bild (Mini-Auflösung) und erkennt rot-blau blinkende Lichter.
+  - 🎬 Action im Bild live: plötzlich viel mehr Bewegung als sonst (Verfolgung, Crash, Kampf).
+  - Live-Ton komplett neu (lief vorher bei manchen nicht): im Log steht "🎧 Live-Ton verbunden"
+    und "🎥 Live-Bild verbunden".
+  - Sofort-Clips: kein Warten mehr – Twitch speichert die Sekunden VOR dem Auslösen, der Moment ist drauf.
+  - Messzeile jede Minute zeigt alle Werte: Chat, Stimme, Spiel, Sirene, Blaulicht, Bild.
+
 NEU IN 3.3
   - Szenen-Erkennung im Bild: Die App schaut, wie viel im Bild passiert (schnelle Fahrten,
     Verfolgungsjagden, Kämpfe, Explosionen, Kameraschwenks) und schneidet Action-Szenen raus –
