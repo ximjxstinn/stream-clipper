@@ -32,7 +32,7 @@ IS_WIN = os.name == "nt"
 
 MAXIMAL = "Maximal (alles Spannende)"
 SENSITIVITY = {  # (Chat-Score, Stimme +dB, Spiel-Action +LU, min. Leute im Chat)
-    MAXIMAL: (1.5, 5.0, 4.0, 2),
+    MAXIMAL: (1.5, 10.0, 6.0, 2),
     "Hoch (mehr Clips)": (2.5, 7.0, 7.0, 3),
     "Mittel": (4.0, 9.0, 10.0, 3),
     "Niedrig (nur große Momente)": (6.0, 13.0, 99.0, 3),
@@ -521,7 +521,7 @@ class Detector:
         self.kws = core.parse_keywords(keywords)
         self.t_chat, self.t_voice, self.t_action, self.min_people = SENSITIVITY.get(sensitivity,
                                                                                      SENSITIVITY["Mittel"])
-        self.game = deque(maxlen=4000)    # (t, dB) ~10x pro Sekunde
+        self.game = deque(maxlen=3000)    # (t, dB) ~10x pro Sekunde (5 Min.)
         self.tones = deque(maxlen=40)     # (t, tonhöhe, anteil) ~10x pro Sekunde
         self.frames = deque(maxlen=900)   # (t, bewegung, rot, blau) ~4x pro Sekunde
         self.cooldown, self.warmup = cooldown, warmup
@@ -547,7 +547,12 @@ class Detector:
             self.msgs.append((t, user, text, core.count_keywords(text, self.kws)))
 
     def add_tone(self, t, f, r):
+        # Nur hörbare Töne zählen: in fast-Stille wirkt sonst jedes leise Piepen wie eine Sirene
         with self.lock:
+            lvl = self.game[-1][1] if self.game else -90.0
+            norm = self._median([v for _, v in list(self.game)[-600:]]) if len(self.game) > 50 else lvl
+            if lvl < -50 or lvl < norm - 3:
+                f, r = None, 0.0
             self.tones.append((t, f, r))
 
     def add_frame(self, t, motion, red, blue):
@@ -597,13 +602,25 @@ class Detector:
             if len(last2) == 2:
                 voice_diff = min(last2) - norm
         action = None
-        if len(game) >= 600:  # ~1 Minute Spielton als Vergleich
+        shots = 0
+        if len(game) >= 1200:  # ~2 Minuten Spielton als Vergleich (sonst wirkt am Anfang alles "laut")
             acc = {}
             for t, v in game:
                 a = acc.setdefault(int(t), [0.0, 0])
                 a[0] += v
                 a[1] += 1
             per_sec = {k: a[0] / a[1] for k, a in acc.items()}  # Mittelwert pro Sekunde
+            # Schüsse/Explosionen: mehrere kurze, sehr laute Knalle innerhalb von 3 s (ein einzelner Knall zählt nicht)
+            norm10 = self._median([v for _, v in game])
+            burst, prev_hi = 0, False
+            for t, v in game:
+                if t < now - 3:
+                    continue
+                hi = v - norm10 >= 12
+                if hi and not prev_hi:
+                    burst += 1
+                prev_hi = hi
+            shots = burst
             norm_g = self._median(list(per_sec.values()))
             last2 = [per_sec[k] for k in range(int(now) - 2, int(now)) if k in per_sec]
             if len(last2) >= 2 and norm_g > -70:
@@ -613,13 +630,14 @@ class Detector:
         recent_f = [x for x in frames if x[0] >= now - 3]
         blue = bluelight_score([(r, b) for _, _, r, b in recent_f]) if len(recent_f) >= 6 else None
         vis = None
-        if len(frames) >= 240:  # ~1 Minute Bild als Vergleich
+        if len(frames) >= 480:  # ~2 Minuten Bild als Vergleich
             base_m = self._median([m for _, m, _, _ in frames])
             last_m = [m for t, m, _, _ in frames if t >= now - 2]
             if last_m and base_m > 0.3:
                 vis = (sum(last_m) / len(last_m)) / base_m
         # Messwerte fürs Log (Maximum pro Minute)
         pk = self.peak
+        pk["shots"] = max(pk.get("shots") or 0, shots)
         for key, val in (("siren", siren), ("blue", blue), ("vis", vis)):
             if val is not None:
                 pk[key] = val if pk.get(key) is None else max(pk[key], val)
@@ -648,9 +666,12 @@ class Detector:
         if warm and action is not None and action >= self.t_action:
             kind = kind or "action"
             reasons.append(f"🎮 Action im Spiel (+{action:.0f} dB)")
-        if siren is not None and siren >= 1.0:
+        if warm and siren is not None and siren >= 1.2:
             kind = kind or "siren"
-            reasons.insert(0, "🚨 Sirene / Polizei")
+            reasons.insert(0, "🚨 Sirene / Alarm / Polizei")
+        if warm and shots >= 3:
+            kind = kind or "shots"
+            reasons.insert(0, f"🔫 Schüsse / Explosionen ({shots} Knalle)")
         if blue is not None and blue >= 1.0:
             kind = kind or "bluelight"
             reasons.insert(0, "🚨 Blaulicht im Bild")
@@ -733,7 +754,7 @@ class LiveClipper:
         sens = self.st.get("live_sens", "Mittel")
         length = int(self.st.get("live_len", 30))
         det = Detector(channel, self.st.get("keywords", core.DEFAULT_KEYWORDS), sens,
-                       cooldown=(length + 2) if sens == MAXIMAL else max(30, length + 10),
+                       cooldown=max(45, length + 15),
                        warmup=60 if sens == MAXIMAL else 120)
         ChatReader(channel, det.add_msg, self.stream_stop, self.log).start()
         # Live immer mithören + mitschauen – unabhängig vom Haken für die VOD-Analyse
@@ -770,7 +791,7 @@ class LiveClipper:
                 self.log(f"   📊 letzte Minute: Chat {pk['u']} Leute · Stimme {fmt(pk['voice'], 'dB')} "
                          f"(ab +{det.t_voice:.0f}) · Spiel {fmt(pk['action'], 'dB')} (ab +{det.t_action:.0f}) · "
                          f"Sirene {f2(pk.get('siren'))} (ab 1) · Blaulicht {f2(pk.get('blue'))} (ab 1) · "
-                         f"Bild ×{f2(pk.get('vis'))} (ab ×{det.t_vis})")
+                         f"Bild ×{f2(pk.get('vis'))} (ab ×{det.t_vis}) · Knalle {pk.get('shots') or 0} (ab 3)")
                 det.peak = {"u": 0, "kw": 0, "voice": None, "action": None, "siren": None, "blue": None,
                             "vis": None}
             if not trig:

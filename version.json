@@ -1,6 +1,6 @@
 {
-  "version": "3.4",
-  "notes": "Live: echte Sirenen- und Blaulicht-Erkennung, Action im Bild, Sofort-Clips, Live-Ton repariert",
+  "version": "3.4.1",
+  "notes": "Live: nur noch Action – Sirene/Alarm, Schüsse, Blaulicht, Bild-Action; Reden löst nicht mehr aus",
   "files": [
     "StreamClipper.pyw",
     "clipper_core.py",
