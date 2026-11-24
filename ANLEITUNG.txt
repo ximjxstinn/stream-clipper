@@ -14,6 +14,15 @@ SO GEHT'S
   4. "Ausgewählte clippen" oder "Alle clippen"
   Oder einfach "Alles automatisch" = analysieren + alle Top-Clips schneiden.
 
+NEU IN 3.7 – NUR SPANNENDE CLIPS, ALLES AUTOMATISCH
+  - 🎯 Spannungs-Check: Jeder fertige Clip wird angeschaut und angehört und bekommt 0–100 Punkte
+    (Schüsse, Explosion, Sirene, Blaulicht, viel Bewegung, laute Action = Punkte;
+     Standbild/Menü und „nur Reden“ = Abzug). Gilt für Live-Clips und VOD-Clips.
+  - Unter der Mindestpunktzahl (Standard 35) = 💤 langweilig → wird nicht hochgeladen
+    (wahlweise behalten oder sofort löschen). „!clip“ aus dem Chat wird nie aussortiert.
+  - Spannende Clips hochladen: „Erst mir zeigen“, „Nach Streamende automatisch“ oder „Sofort automatisch“.
+  - Alles unter „⚙ Live-Auslöser einstellen“ → „Nach dem Clip – automatisch“.
+
 NEU IN 3.6 – SCHÜSSE UND EXPLOSIONEN GETRENNT
   - 🔫 Schüsse: zählt jeden einzelnen Schuss (harter Knall, der sofort wieder abklingt).
     Geclippt wird erst ab mehreren Schüssen in 4 Sekunden (Standard 4) – z. B. Sturmgewehr-Salve

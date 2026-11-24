@@ -33,7 +33,7 @@ except ImportError:  # ältere Updater kennen live_clipper.py noch nicht → sel
     except Exception:
         live_clipper = None
 
-VERSION = "3.6"
+VERSION = "3.7"
 import sys
 SETTINGS_FILE = os.path.join(core.APP_DIR, "settings.json")
 SESSION_DIR = os.path.join(core.APP_DIR, "gespeichert")
@@ -58,7 +58,7 @@ DEFAULTS = {
     "w_chat": 65, "audio": True, "fmt": FORMATS[2], "vstyle": "Blur-Hintergrund", "quality": "1080p",
     "bestof": False, "nomenu": True, "vis": True, "mode": "Maximal (alles Spannende)", "live_times": [], "keywords": core.DEFAULT_KEYWORDS,
     "outdir": os.path.join(os.path.expanduser("~"), "Videos", "Stream Clips"),
-    "auto": False, "seen": [], "autostart": False, "autoupdate": True, "last_session": "", "tray": True, "tray_hint_shown": False, "live_popup": True, "live_voice": 12, "live_trig": {}, "live_game": 6, "live_vis": 1.6, "live_gap": 60, "live_hour": 30, "live_shots": 4, "live": False, "live_sens": "Maximal (alles Spannende)", "live_len": 30, "live_max": 100, "win_zoomed": True, "win_geo": "",
+    "auto": False, "seen": [], "autostart": False, "autoupdate": True, "last_session": "", "tray": True, "tray_hint_shown": False, "live_popup": True, "live_voice": 12, "live_trig": {}, "live_game": 6, "live_vis": 1.6, "live_gap": 60, "live_hour": 30, "live_shots": 4, "live_rate": True, "live_rate_min": 35, "live_drop": "keep", "live_auto": "approve", "live": False, "live_sens": "Maximal (alles Spannende)", "live_len": 30, "live_max": 100, "win_zoomed": True, "win_geo": "",
 }
 
 
@@ -636,12 +636,15 @@ class App:
         if up:
             return "⬆ hochgeladen (" + " + ".join({"yt": "YouTube", "tt": "TikTok"}[p] for p in up) + ")"
         qc = h.get("qc")
+        th = h.get("thrill") or {}
+        if h.get("boring"):
+            return f"💤 langweilig ({th.get('score', 0)}/100) – kein Upload"
         if qc and not qc.get("ok"):
             return "⚠ " + "; ".join(qc.get("problems", []))[:60]
         if h.get("pending"):
             return "⏳ wartet auf deine Freigabe"
         if qc and qc.get("ok"):
-            return "✅ geprüft – ok"
+            return "✅ geprüft – ok" + (f" · 🎯 {th['score']}/100" if th else "")
         if h.get("clipped"):
             return "✂ geschnitten"
         return ""
@@ -783,6 +786,39 @@ class App:
             ttk.Label(f, text=hint, style="Muted.TLabel").grid(row=r, column=2, sticky="w")
             r += 1
 
+        ttk.Label(f, text="Nach dem Clip – automatisch", style="Sec.TLabel").grid(row=r, column=0, columnspan=3,
+                                                                                    sticky="w", pady=(12, 6))
+        r += 1
+        v_rate = tk.BooleanVar(value=self.s.get("live_rate", True))
+        ttk.Checkbutton(f, text="🎯 Jeden Clip auf Spannung prüfen – nur spannende behalten", variable=v_rate).grid(
+            row=r, column=0, columnspan=3, sticky="w")
+        r += 1
+        ents["live_rate_min"] = tk.IntVar(value=int(self.s.get("live_rate_min", 35)))
+        ttk.Label(f, text="Mindestens so spannend (0–100 Punkte)", style="Panel.TLabel").grid(row=r, column=0,
+                                                                                             sticky="w", pady=2)
+        ttk.Spinbox(f, from_=0, to=100, increment=5, textvariable=ents["live_rate_min"], width=6).grid(
+            row=r, column=1, sticky="w", padx=8)
+        ttk.Label(f, text="Schüsse/Explosion/Sirene/Action = Punkte", style="Muted.TLabel").grid(row=r, column=2,
+                                                                                               sticky="w")
+        r += 1
+        drops = {"keep": "Behalten, aber nicht hochladen", "delete": "Sofort löschen"}
+        v_drop = tk.StringVar(value=drops.get(self.s.get("live_drop", "keep"), drops["keep"]))
+        ttk.Label(f, text="Langweilige Clips", style="Panel.TLabel").grid(row=r, column=0, sticky="w", pady=2)
+        ttk.Combobox(f, values=list(drops.values()), textvariable=v_drop, state="readonly", width=30).grid(
+            row=r, column=1, columnspan=2, sticky="w", padx=8)
+        r += 1
+        autos = {"approve": "Erst mir zeigen (Freigabe)", "end": "Nach Streamende automatisch hochladen",
+                 "now": "Sofort automatisch hochladen"}
+        v_auto = tk.StringVar(value=autos.get(self.s.get("live_auto", "approve"), autos["approve"]))
+        ttk.Label(f, text="Spannende Clips hochladen", style="Panel.TLabel").grid(row=r, column=0, sticky="w", pady=2)
+        ttk.Combobox(f, values=list(autos.values()), textvariable=v_auto, state="readonly", width=34).grid(
+            row=r, column=1, columnspan=2, sticky="w", padx=8)
+        r += 1
+        ttk.Label(f, text="Hochgeladen wird auf die Plattformen, die unter „⬆ Upload einrichten“ auf Auto stehen "
+                          "(TikTok als Entwurf, YouTube wie dort eingestellt).", style="Muted.TLabel",
+                  wraplength=460).grid(row=r, column=0, columnspan=3, sticky="w")
+        r += 1
+
         def preset(level):
             vals = {"wenig": (10, 25, 15, 180, 10, 8), "mittel": (6, 16, 12, 60, 30, 4),
                     "viel": (4, 14, 8, 30, 80, 3)}[level]
@@ -808,6 +844,10 @@ class App:
             self.s["live_gap"] = gi("live_gap", 60)
             self.s["live_hour"] = gi("live_hour", 30)
             self.s["live_shots"] = gi("live_shots", 4)
+            self.s["live_rate"] = bool(v_rate.get())
+            self.s["live_rate_min"] = max(0, min(100, gi("live_rate_min", 35)))
+            self.s["live_drop"] = next((k for k, t in drops.items() if t == v_drop.get()), "keep")
+            self.s["live_auto"] = next((k for k, t in autos.items() if t == v_auto.get()), "approve")
             self.v_live_voice.set(self.s["live_voice"])
             self.settings()
             self.log("✔ Live-Auslöser gespeichert – gilt sofort, auch mitten im Stream.")
@@ -874,12 +914,21 @@ class App:
         self.tree.see(str(i))
         self.save_session()
         self._live_popup(i)
+        if self.s.get("live_auto") == "now" and not h.get("boring") and (h.get("qc") or {}).get("ok", True):
+            src = dict(self.meta)
+            h["auto_queued"] = True
+            threading.Thread(target=lambda: self._auto_upload(src, [(i, h)], direct=False, force=True),
+                             daemon=True).start()
 
     def _live_stream_ended(self, stream):
         if not (self.meta and self.meta.get("kind") == "live" and self.highlights):
             return
         items = list(enumerate(self.highlights))
-        threading.Thread(target=lambda: self._auto_upload(self.meta, items, direct=False), daemon=True).start()
+        mode = self.s.get("live_auto", "approve")
+        if mode == "now":
+            items = [x for x in items if not (x[1].get("uploaded") or {}) and not x[1].get("auto_queued")]
+        threading.Thread(target=lambda: self._auto_upload(self.meta, items, direct=False, force=(mode != "approve")),
+                         daemon=True).start()
 
     # ------------------------------------------------------- Infobereich (Tray) --
     def _pip(self, *pkgs):
@@ -1684,6 +1733,16 @@ class App:
                 ok, probs, qinfo = True, [], {"fehler": str(e)[:80]}
             h["qc"] = {"ok": ok, "problems": probs, "info": qinfo}
             self.log("   🔎 Check: " + ("✅ alles ok" if ok else "⚠ " + ", ".join(probs)))
+            if live_clipper and st.get("live_rate", True) and wide and os.path.isfile(wide):
+                try:
+                    pts, why = live_clipper.rate_clip(wide, min_shots=max(2, int(st.get("live_shots", 4))))
+                    keep = pts >= int(st.get("live_rate_min", 35))
+                    h["thrill"] = {"score": pts, "why": why, "keep": keep}
+                    h["boring"] = not keep
+                    self.log(f"   🎯 Spannung: {pts}/100" + (" · " + ", ".join(why) if why else "")
+                             + ("" if keep else " → 💤 zu langweilig, kein Upload"))
+                except Exception as e:
+                    self.log(f"   ⚠ Spannungs-Check ging nicht ({str(e)[:80]})")
             link = f"{core.vod_url(src['id'])}?t={core.twitch_t(h['start'])}" if src["kind"] == "vod" else ""
             lines.append(f"#{i + 1}  {core.fmt_time(h['start'])}  Hype {h['score']}  {h['reason']}  {link}")
             h["clipped"] = True
@@ -1704,7 +1763,7 @@ class App:
         self._auto_upload(src, items, direct=True)
         return folder
 
-    def _auto_upload(self, src, items, direct=True):
+    def _auto_upload(self, src, items, direct=True, force=False):
         """Nach dem Clippen: beste geprüfte Clips zur Freigabe vormerken oder direkt hochladen."""
         if not uploader:
             return
@@ -1712,14 +1771,20 @@ class App:
         plats = [p for p, k in (("yt", "yt_auto"), ("tt", "tt_auto")) if conf.get(k)]
         if not plats:
             return
+        boring = [x for x in items if x[1].get("boring")]
+        items = [x for x in items if not x[1].get("boring")]
+        if boring:
+            self.log(f"💤 {len(boring)} langweilige Clip(s) werden nicht hochgeladen.")
         good = [x for x in items if (x[1].get("qc") or {}).get("ok", True) and not (x[1].get("uploaded") or {})]
         bad = len([x for x in items if not (x[1].get("qc") or {}).get("ok", True)])
         if bad:
             self.log(f"⚠ {bad} Clip(s) haben den Check nicht bestanden und werden nicht hochgeladen.")
-        best = sorted(good, key=lambda x: -x[1]["score"])[:max(1, int(conf.get("auto_max", 3)))]
+        best = sorted(good, key=lambda x: -((x[1].get("thrill") or {}).get("score", 0) * 10 + x[1]["score"]))
+        if not force:
+            best = best[:max(1, int(conf.get("auto_max", 3)))]
         if not best:
             self.log("⬆ Kein Clip hat den Check bestanden – nichts hochgeladen.")
-        elif conf.get("approve", True):
+        elif conf.get("approve", True) and not force:
             for i, h in best:
                 h["pending"] = True
                 self.ui(lambda i=i: self._refresh_row(i))

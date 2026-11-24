@@ -1,6 +1,6 @@
 {
-  "version": "3.6",
-  "notes": "Schüsse (erst ab mehreren / Dauerfeuer) und Explosionen getrennt erkennen, Schuss-Anzahl einstellbar",
+  "version": "3.7",
+  "notes": "Spannungs-Check: nur spannende Clips behalten/hochladen, Upload komplett automatisch einstellbar",
   "files": [
     "StreamClipper.pyw",
     "clipper_core.py",

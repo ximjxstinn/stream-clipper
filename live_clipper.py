@@ -555,6 +555,103 @@ class VideoReader(threading.Thread):
 
 
 # --------------------------------------------------------------------------- #
+#  Spannungs-Check: fertigen Clip anschauen + anhören und 0–100 Punkte geben
+# --------------------------------------------------------------------------- #
+def _med(vals):
+    s = sorted(vals)
+    return s[len(s) // 2] if s else 0.0
+
+
+def rate_clip(path, base_game=None, base_motion=None, min_shots=4):
+    """Bewertet, wie spannend ein Clip ist. Gibt (punkte 0–100, [gründe]) zurück.
+    Zählt: Schüsse, Explosionen, Sirenen, Blaulicht, viel Bewegung, laute Action. Abzug: Standbild/Menü, nur Reden."""
+    kw = {"creationflags": 0x08000000} if IS_WIN else {}
+    a = subprocess.run([core.tool("ffmpeg"), "-v", "error", "-i", path, "-vn", "-ac", "1", "-ar", str(SR),
+                        "-f", "s16le", "-"], capture_output=True, stdin=subprocess.DEVNULL, timeout=300, **kw).stdout
+    v = subprocess.run([core.tool("ffmpeg"), "-v", "error", "-i", path, "-an", "-vf", f"fps=4,scale={VW}:{VH}",
+                        "-pix_fmt", "rgb24", "-f", "rawvideo", "-"], capture_output=True, stdin=subprocess.DEVNULL,
+                       timeout=300, **kw).stdout
+    pcm = array.array("h", a[:len(a) // 2 * 2])
+    if sys.byteorder == "big":
+        pcm.byteswap()
+    hp, tr = [0.0, 0.0], []
+    blocks = []  # (spiel_db, bass_anteil, schüsse, (tonhöhe, anteil))
+    for k in range(len(pcm) // FRAME):
+        smp = [x / 32768.0 for x in pcm[k * FRAME:(k + 1) * FRAME]]
+        g, vd, tone = analyze_audio_frame(smp, hp)
+        blocks.append((g, g - vd, count_transients(smp, tr), tone))
+    fsz = VW * VH * 3
+    frames, prev = [], None
+    for k in range(len(v) // fsz):
+        m, rd, bl, prev = analyze_video_frame(v[k * fsz:(k + 1) * fsz], prev)
+        if k:
+            frames.append((m, rd, bl))
+    score, why = 0.0, []
+    if blocks:
+        gs = [b[0] for b in blocks]
+        norm = base_game if base_game is not None else _med(gs)
+        # Schüsse: meiste Treffer in einem 4-s-Fenster (gleiche Regeln wie live)
+        best_shots = 0
+        for st in range(0, max(1, len(blocks) - 39), 5):
+            win = blocks[st:st + 40]
+            local = _med([b[0] for b in win])
+            n = sum(b[2] for b in win if b[2] and b[0] - norm >= 8 and b[0] - local >= 6 and b[1] >= 2.0)
+            best_shots = max(best_shots, n)
+        boom = False
+        for i, b in enumerate(blocks[:-5]):
+            if b[0] - norm >= 15 and b[1] >= 3.0:
+                tail = blocks[i + 1:i + 6]
+                if min(x[0] for x in tail) - norm >= 8 and sum(x[2] for x in blocks[i:i + 6]) <= 2:
+                    boom = True
+                    break
+        siren = 0.0
+        for st in range(0, max(1, len(blocks) - 29), 10):
+            siren = max(siren, siren_score([b[3] for b in blocks[st:st + 30]]))
+        loud = sum(1 for b in blocks if b[0] - norm >= 6 and b[1] >= 2.0) / len(blocks)  # laut UND Spiel, nicht Stimme
+        talk = sum(1 for b in blocks if b[1] < 1.5 and b[0] > norm - 3) / len(blocks)
+        if boom:
+            score += 30
+            why.append("💥 Explosion")
+        if best_shots >= min_shots and not boom:
+            score += min(35, 10 + best_shots * 2)
+            why.append(f"🔫 {best_shots} Schüsse")
+        if siren >= 1.2:
+            score += 20
+            why.append("🚨 Sirene")
+        if loud >= 0.1:
+            score += min(15, loud * 50)
+            why.append(f"🔊 {loud * 100:.0f} % laute Action")
+    else:
+        talk = 0.0
+    if frames:
+        ms = [f[0] for f in frames]
+        base = base_motion if base_motion else None
+        mean_m = sum(ms) / len(ms)
+        if base and base > 0.3:
+            ratio = mean_m / base
+            if ratio >= 1.2:
+                score += min(25, (ratio - 1.0) * 25)
+                why.append(f"🎬 Bewegung ×{ratio:.1f}")
+        elif mean_m >= 4:
+            score += min(20, mean_m * 1.5)
+            why.append("🎬 viel Bewegung")
+        blue = 0.0
+        for st in range(0, max(1, len(frames) - 11), 4):
+            blue = max(blue, bluelight_score([(r, b) for _, r, b in frames[st:st + 12]]))
+        if blue >= 1.0:
+            score += 15
+            why.append("🚨 Blaulicht")
+        static = sum(1 for m in ms if m < 0.3) / len(ms)
+        if static > 0.5:
+            score -= 30
+            why.append(f"⏸ {static * 100:.0f} % Standbild/Menü")
+    if talk > 0.6 and score < 30:
+        score -= 10
+        why.append("🗣 fast nur Reden")
+    return int(max(0, min(100, round(score)))), why
+
+
+# --------------------------------------------------------------------------- #
 #  Hype-Erkennung in Echtzeit
 # --------------------------------------------------------------------------- #
 CLIP_REQ = re.compile(r"(^|\s)!?(clip|clippen|clip it|clip das|clipt)(\s|$|!)", re.I)
@@ -573,6 +670,8 @@ class Detector:
         self.low = deque(maxlen=60)       # (t, Bass-Anteil dB) – hoch = Knall/Explosion, niedrig = Sprache
         self.hits = deque(maxlen=60)      # (t, Einschläge im 0,1-s-Block) – Schüsse
         self.min_shots = 4
+        self.norm_game = None      # normales Spiel-dB (für die Spannungs-Bewertung der fertigen Clips)
+        self.norm_motion = None
         self.enabled = {k: True for k in TRIGGERS}
         self.clip_times = deque()
         self.max_per_hour = 999
@@ -672,6 +771,7 @@ class Detector:
             per_sec = {k: a[0] / a[1] for k, a in acc.items()}  # Mittelwert pro Sekunde
             # Schüsse: mehrere harte Einschläge in 4 s (Dauerfeuer/Sturmgewehr oder mehrere Schüsse) – einzelner Schuss zählt nicht
             norm10 = self._median([v for _, v in game])
+            self.norm_game = norm10
             with self.lock:
                 lows = {round(t, 1): v for t, v in self.low}
                 hitd = {round(t, 1): h for t, h in self.hits}
@@ -708,6 +808,7 @@ class Detector:
         vis = None
         if len(frames) >= 480:  # ~2 Minuten Bild als Vergleich
             base_m = self._median([m for _, m, _, _ in frames])
+            self.norm_motion = base_m
             last_m = [m for t, m, _, _ in frames if t >= now - 2]
             if last_m and base_m > 0.3:
                 vis = (sum(last_m) / len(last_m)) / base_m
@@ -863,6 +964,7 @@ class LiveClipper:
         det = Detector(channel, self.st.get("keywords", core.DEFAULT_KEYWORDS), sens,
                        cooldown=max(45, length + 15),
                        warmup=60 if sens == MAXIMAL else 120)
+        self.det = det
         ChatReader(channel, det.add_msg, self.stream_stop, self.log).start()
         # Live immer mithören + mitschauen – unabhängig vom Haken für die VOD-Analyse
         ar = AudioReader(channel, det.add_db, self.stream_stop, self.log)
@@ -955,11 +1057,34 @@ class LiveClipper:
                 tall = core.make_vertical(wide, base + "_tiktok.mp4", self.st.get("vstyle_key", "blur"), runner)
             dur = float(info.get("duration") or length)
             ok, probs, qinfo = core.check_clip(tall or wide, dur, runner, tall=bool(tall))
+            thrill = None
+            if self.st.get("live_rate", True):
+                try:
+                    det = getattr(self, "det", None)
+                    pts, why = rate_clip(wide, getattr(det, "norm_game", None), getattr(det, "norm_motion", None),
+                                         max(2, int(self.st.get("live_shots", 4))))
+                    keep = trig.get("kind") == "clip" or pts >= int(self.st.get("live_rate_min", 35))
+                    thrill = {"score": pts, "why": why, "keep": keep}
+                    self.log(f"   🎯 Spannung #{nr}: {pts}/100 " + (("· " + ", ".join(why)) if why else "")
+                             + ("" if keep else " → 💤 zu langweilig, wird nicht hochgeladen"))
+                except Exception as e:
+                    self.log(f"   ⚠ Spannungs-Check ging nicht ({str(e)[:80]})")
             h = {"time": offset, "start": max(0.0, offset - dur), "end": offset, "score": trig["score"],
                  "reason": "🔴 LIVE · " + trig["reason"], "chat": trig["chat"], "features": trig["features"],
                  "clipped": True, "live": True, "clip_id": cid, "clip_url": info.get("url", ""),
                  "files": {"wide": wide, "tall": tall, "vstyle": self.st.get("vstyle_key", "blur")},
-                 "qc": {"ok": ok, "problems": probs, "info": qinfo}}
+                 "qc": {"ok": ok, "problems": probs, "info": qinfo}, "thrill": thrill}
+            if thrill and not thrill["keep"]:
+                h["boring"] = True
+                if self.st.get("live_drop") == "delete":
+                    for fp in (wide, tall):
+                        try:
+                            if fp:
+                                os.remove(fp)
+                        except Exception:
+                            pass
+                    self.log(f"   🗑 Clip #{nr} gelöscht (bleibt auf Twitch unter deinen Clips)")
+                    return
             self.log(f"   ✅ LIVE-Clip #{nr} fertig ({info.get('url', '')})" +
                      ("" if ok else " – ⚠ " + ", ".join(probs)))
             self.on_clip(dict(self.stream or {}), h)
