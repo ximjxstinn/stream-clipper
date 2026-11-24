@@ -1433,6 +1433,204 @@ def obs_check(port, password):
         o.close()
 
 
+class AudioLoopback(threading.Thread):
+    """Nimmt auf, was aus deinen Lautsprechern/dem Headset kommt (WASAPI-Loopback), immer die letzten ~2 Min."""
+    RATE, CH = 48000, 2
+
+    def __init__(self, stop, log):
+        super().__init__(daemon=True)
+        self.stop, self.log = stop, log
+        self.chunks = deque(maxlen=1300)  # (endzeit, int16-bytes) à 0,1 s
+        self.ok = False
+
+    def run(self):
+        try:
+            import warnings
+            warnings.filterwarnings("ignore")
+            import soundcard as scard
+            spk = scard.default_speaker()
+            mic = scard.get_microphone(id=str(spk.name), include_loopback=True)
+        except Exception as e:
+            self.log(f"   ⚠ Ton-Aufnahme nicht möglich ({str(e)[:90]}) – Clips werden ohne Ton gespeichert.")
+            return
+        try:
+            with mic.recorder(samplerate=self.RATE, channels=self.CH) as rec:
+                self.ok = True
+                self.log("   🔊 Ton wird mitgeschnitten (was aus deinen Lautsprechern/dem Headset kommt)")
+                n = self.RATE // 10
+                while not self.stop.is_set():
+                    data = rec.record(numframes=n)
+                    t = time.time()
+                    pcm = (data.clip(-1, 1) * 32767).astype("<i2").tobytes()
+                    self.chunks.append((t, pcm))
+        except Exception as e:
+            self.ok = False
+            self.log(f"   ⚠ Ton-Aufnahme abgebrochen ({str(e)[:90]})")
+
+    def write_wav(self, a, b, path):
+        """Ton zwischen den Uhrzeiten a und b als WAV schreiben. Fehlendes wird mit Stille aufgefüllt."""
+        import wave
+        bps = self.CH * 2
+        total = int((b - a) * self.RATE)
+        buf = bytearray(total * bps)
+        for t_end, pcm in list(self.chunks):
+            t_start = t_end - len(pcm) / bps / self.RATE
+            if t_end <= a or t_start >= b:
+                continue
+            src_off = max(0, int((a - t_start) * self.RATE)) * bps
+            dst_off = max(0, int((t_start - a) * self.RATE)) * bps
+            piece = pcm[src_off:]
+            piece = piece[:max(0, len(buf) - dst_off)]
+            buf[dst_off:dst_off + len(piece)] = piece
+        with wave.open(path, "wb") as w:
+            w.setnchannels(self.CH)
+            w.setsampwidth(2)
+            w.setframerate(self.RATE)
+            w.writeframes(bytes(buf))
+        return path
+
+
+class SelfRecorder(threading.Thread):
+    """Nimmt das Remote-Play-Fenster SELBST auf (ohne OBS): ffmpeg schreibt 4-Sekunden-Stücke in voller Qualität
+    und liefert gleichzeitig Mini-Bilder für die Erkennung. Ton kommt aus AudioLoopback."""
+
+    def __init__(self, rect, workdir, on_frame, on_scene, stop, log):
+        super().__init__(daemon=True)
+        self.rect, self.dir, self.stop, self.log = rect, workdir, stop, log
+        self.on_frame, self.on_scene = on_frame, on_scene
+        self.t0 = None
+        self.proc = None
+        self.audio = AudioLoopback(stop, log)
+
+    def _cmd(self):
+        x, y, w, h = self.rect
+        w, h = w - w % 2, h - h % 2
+        return [core.tool("ffmpeg"), "-hide_banner", "-loglevel", "error", "-nostats",
+                "-f", "gdigrab", "-framerate", "30", "-draw_mouse", "0", "-offset_x", str(x), "-offset_y", str(y),
+                "-video_size", f"{w}x{h}", "-i", "desktop",
+                "-filter_complex", f"[0:v]split=2[a][b];[a]scale=-2:'min(1080,ih)',format=yuv420p[hq];"
+                                   f"[b]fps=4,scale={VW}:{VH}[lq]",
+                "-map", "[hq]", "-c:v", "libx264", "-preset", "superfast", "-crf", "23", "-g", "30",
+                "-f", "segment", "-segment_time", "4", "-reset_timestamps", "1",
+                "-segment_list", "list.csv", "-segment_list_type", "csv", "seg_%06d.mp4",
+                "-map", "[lq]", "-pix_fmt", "rgb24", "-f", "rawvideo", "pipe:1"]
+
+    def run(self):
+        os.makedirs(self.dir, exist_ok=True)
+        for f in os.listdir(self.dir):
+            try:
+                os.remove(os.path.join(self.dir, f))
+            except OSError:
+                pass
+        self.audio.start()
+        kw = {"creationflags": 0x08000000} if IS_WIN else {}
+        size = VW * VH * 3
+        try:
+            self.proc = subprocess.Popen(self._cmd(), cwd=self.dir, stdout=subprocess.PIPE,
+                                         stderr=subprocess.DEVNULL, stdin=subprocess.PIPE, **kw)
+            prev = None
+            last_clean = time.time()
+            while not self.stop.is_set():
+                raw = self.proc.stdout.read(size)
+                if not raw or len(raw) < size:
+                    break
+                now = time.time()
+                if self.t0 is None:
+                    self.t0 = now - 0.25
+                    self.log("   🎥 Nehme das Remote-Play-Fenster selbst auf (ohne OBS) – erkenne Cops/Explosionen")
+                motion, red, blue, prev = analyze_video_frame(raw, prev)
+                self.on_frame(now, motion, red, blue)
+                try:
+                    self.on_scene(now, *scene_frame(raw))
+                except Exception:
+                    pass
+                if now - last_clean > 15:
+                    last_clean = now
+                    self._cleanup(now)
+        except Exception as e:
+            if not self.stop.is_set():
+                self.log(f"   ⚠ Eigene Aufnahme ging nicht ({str(e)[:100]})")
+        finally:
+            self.kill()
+
+    def kill(self):
+        p = self.proc
+        if p and p.poll() is None:
+            try:
+                p.stdin.write(b"q")
+                p.stdin.flush()
+                p.wait(timeout=5)
+            except Exception:
+                try:
+                    p.kill()
+                except Exception:
+                    pass
+
+    def segments(self):
+        """[(datei, start_uhrzeit, ende_uhrzeit)] der fertigen Stücke."""
+        out = []
+        if self.t0 is None:
+            return out
+        try:
+            with open(os.path.join(self.dir, "list.csv"), encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    parts = line.strip().split(",")
+                    if len(parts) >= 3:
+                        fp = os.path.join(self.dir, parts[0])
+                        if os.path.isfile(fp):
+                            out.append((fp, self.t0 + float(parts[1]), self.t0 + float(parts[2])))
+        except (OSError, ValueError):
+            pass
+        return out
+
+    def _cleanup(self, now):
+        for fp, a, b in self.segments():
+            if b < now - 150:
+                try:
+                    os.remove(fp)
+                except OSError:
+                    pass
+
+    def save(self, length, out_path):
+        """Speichert die letzten `length` Sekunden (bis jetzt) als MP4 mit Ton."""
+        T = time.time()
+        segs = []
+        for _ in range(30):  # warten, bis das Stück mit dem Moment fertig geschrieben ist
+            segs = self.segments()
+            if segs and segs[-1][2] >= T - 0.2:
+                break
+            time.sleep(0.5)
+        if not segs:
+            raise LiveError("Noch keine Aufnahme vorhanden")
+        A = max(segs[0][1], T - length)
+        use = [s_ for s_ in segs if s_[2] > A and s_[1] < T]
+        if not use:
+            raise LiveError("Aufnahme-Stücke fehlen")
+        cat = os.path.join(self.dir, f"cat_{int(T)}.txt")
+        with open(cat, "w", encoding="utf-8") as f:
+            for fp, _, _ in use:
+                f.write("file '" + fp.replace("\\", "/").replace("'", "'\\''") + "'\n")
+        args = [core.tool("ffmpeg"), "-y", "-v", "error", "-ss", f"{max(0.0, A - use[0][1]):.2f}",
+                "-f", "concat", "-safe", "0", "-i", cat]
+        wav = None
+        if self.audio.ok and self.audio.chunks:
+            wav = self.audio.write_wav(A, min(T, use[-1][2]), os.path.join(self.dir, f"a_{int(T)}.wav"))
+            args += ["-i", wav, "-map", "0:v", "-map", "1:a", "-c:a", "aac", "-b:a", "160k"]
+        args += ["-t", f"{min(T, use[-1][2]) - A:.2f}", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+                 "-pix_fmt", "yuv420p", "-movflags", "+faststart", out_path]
+        kw = {"creationflags": 0x08000000} if IS_WIN else {}
+        r = subprocess.run(args, capture_output=True, stdin=subprocess.DEVNULL, timeout=300, **kw)
+        for fp in (cat, wav):
+            try:
+                if fp:
+                    os.remove(fp)
+            except OSError:
+                pass
+        if r.returncode != 0 or not os.path.isfile(out_path):
+            raise LiveError("Clip speichern fehlgeschlagen: " + r.stderr.decode("utf-8", "replace")[-200:])
+        return out_path
+
+
 class RemotePlayClipper(LiveClipper):
     """Clippt PS5-Gameplay, wenn du NICHT streamst: schaut das PS-Remote-Play-Fenster mit (Cops, Explosionen,
     Blaulicht) und lässt OBS den Wiederholungspuffer speichern (OBS nimmt das Fenster + Ton auf)."""
@@ -1474,18 +1672,25 @@ class RemotePlayClipper(LiveClipper):
                        "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
         self.count = 0
         self.stream_stop = threading.Event()
-        ok, txt = obs_check(self.st.get("obs_port", 4455), self.st.get("obs_pw", ""))
-        self.log(f"🎮 PS Remote Play erkannt – ich schaue mit. OBS: {'✅ ' if ok else '⚠ '}{txt}")
-        if not ok:
-            self.notify("⚠ OBS fehlt", "Für Remote-Play-Clips muss OBS mit Wiederholungspuffer laufen.")
-        self.on_state("🎮 Remote Play – 0 Clips")
+        self.self_rec = None
         det = Detector(self.st.get("channel", "x"), self.st.get("keywords", core.DEFAULT_KEYWORDS), "Mittel",
                        cooldown=60, warmup=90)
         self.det = det
-        vr = VideoReader("rp", det.add_frame, self.stream_stop, self.log)
-        vr.input_args = self._grab_args
-        vr.on_scene = det.add_scene
-        vr.start()
+        if self.st.get("rp_mode", "self") == "self":
+            self.log("🎮 PS Remote Play erkannt – ich nehme selbst auf und schaue mit (ohne OBS).")
+            self.self_rec = SelfRecorder(self.rect, os.path.join(core.WORK_DIR, "_remoteplay"), det.add_frame,
+                                         det.add_scene, self.stream_stop, self.log)
+            self.self_rec.start()
+        else:
+            ok, txt = obs_check(self.st.get("obs_port", 4455), self.st.get("obs_pw", ""))
+            self.log(f"🎮 PS Remote Play erkannt – ich schaue mit. OBS: {'✅ ' if ok else '⚠ '}{txt}")
+            if not ok:
+                self.notify("⚠ OBS fehlt", "Für Remote-Play-Clips mit OBS muss OBS mit Wiederholungspuffer laufen.")
+            vr = VideoReader("rp", det.add_frame, self.stream_stop, self.log)
+            vr.input_args = self._grab_args
+            vr.on_scene = det.add_scene
+            vr.start()
+        self.on_state("🎮 Remote Play – 0 Clips")
         threading.Thread(target=self._detect, args=(det, None), daemon=True).start()
 
     def _end(self):
@@ -1503,29 +1708,38 @@ class RemotePlayClipper(LiveClipper):
             self.notify("✂ Clip!", trig["reason"][:120])
             self.count += 1
             nr = self.count
-            self.log(f"✂ REMOTE-PLAY-Clip #{nr}: {trig['reason']} – speichere gleich die letzten Sekunden …")
-            self.on_state(f"🎮 Remote Play – {self.count} Clips")
+            self.log(f"✂ {self.state_prefix}-Clip #{nr}: {trig['reason']} – speichere gleich die letzten Sekunden …")
+            self.on_state(f"{self.state_prefix} – {self.count} Clips")
             # kurz warten, damit auch das Danach (Explosion, Crash) mit drauf ist
             time.sleep(max(0, int(self.st.get("rp_post", 8))))
-            with self.obs_lock:
-                o = OBS(self.st.get("obs_port", 4455), self.st.get("obs_pw", ""))
-                try:
-                    o.connect()
-                    o.call("SaveReplayBuffer")
-                    path = ""
-                    for _ in range(20):
-                        time.sleep(0.5)
-                        path = (o.call("GetLastReplayBufferReplay") or {}).get("savedReplayPath", "")
-                        if path and path != getattr(self, "_last_replay", "") and os.path.isfile(path):
-                            break
-                    self._last_replay = path
-                finally:
-                    o.close()
+            rec = getattr(self, "self_rec", None)
+            if rec is not None:
+                length = int(self.st.get("live_len", 30)) + max(0, int(self.st.get("rp_post", 8)))
+                tmp = os.path.join(core.WORK_DIR, "_remoteplay", f"clip_{nr:02d}_{int(time.time())}.mp4")
+                with self.obs_lock:
+                    path = rec.save(length, tmp)
+                self._last_replay = path
+            else:
+                with self.obs_lock:
+                    o = OBS(self.st.get("obs_port", 4455), self.st.get("obs_pw", ""))
+                    try:
+                        o.connect()
+                        o.call("SaveReplayBuffer")
+                        path = ""
+                        for _ in range(20):
+                            time.sleep(0.5)
+                            path = (o.call("GetLastReplayBufferReplay") or {}).get("savedReplayPath", "")
+                            if path and path != getattr(self, "_last_replay", "") and os.path.isfile(path):
+                                break
+                        self._last_replay = path
+                    finally:
+                        o.close()
             if not path or not os.path.isfile(path):
                 raise LiveError("OBS hat keinen Clip gespeichert (Wiederholungspuffer an?)")
             time.sleep(1.5)  # OBS schreibt die Datei noch fertig
             date = time.strftime("%Y-%m-%d")
-            folder = os.path.join(self.st["outdir"], f"{date}_PS5_RemotePlay")
+            folder = os.path.join(self.st["outdir"], f"{date}_PS5_" + ("Capture" if "Capture" in self.state_prefix
+                                                                         else "RemotePlay"))
             os.makedirs(folder, exist_ok=True)
             base = os.path.join(folder, f"rp{nr:02d}_{time.strftime('%H-%M-%S')}")
             wide = base + os.path.splitext(path)[1]
@@ -1553,13 +1767,121 @@ class RemotePlayClipper(LiveClipper):
                     self.log(f"   ⚠ Spannungs-Check ging nicht ({str(e)[:80]})")
             t0 = time.time() - (self.det.start or time.time())
             h = {"time": t0, "start": max(0.0, t0 - 30), "end": t0, "score": trig["score"],
-                 "reason": "🎮 REMOTE PLAY · " + trig["reason"], "chat": trig["chat"], "features": trig["features"],
+                 "reason": ("🎥 CAPTURE · " if "Capture" in self.state_prefix else "🎮 REMOTE PLAY · ") + trig["reason"], "chat": trig["chat"], "features": trig["features"],
                  "clipped": True, "live": True, "files": {"wide": wide, "tall": tall,
                                                            "vstyle": self.st.get("vstyle_key", "blur")},
                  "qc": {"ok": ok, "problems": probs, "info": qinfo}, "thrill": thrill}
             if thrill and not thrill["keep"]:
                 h["boring"] = True
-            self.log(f"   ✅ Remote-Play-Clip #{nr} fertig: {os.path.basename(wide)}")
+            self.log(f"   ✅ {self.state_prefix}-Clip #{nr} fertig: {os.path.basename(wide)}")
             self.on_clip(dict(self.stream or {}), h)
         except Exception as e:
-            self.log(f"   ❌ Remote-Play-Clip fehlgeschlagen: {e}")
+            self.log(f"   ❌ {self.state_prefix}-Clip fehlgeschlagen: {e}")
+
+
+# --------------------------------------------------------------------------- #
+#  🎥 Capture-Karte (oder jede andere Quelle in OBS): App schaut das OBS-Bild mit, OBS speichert den Clip
+# --------------------------------------------------------------------------- #
+class OBSFrameReader(threading.Thread):
+    """Holt 4x pro Sekunde ein Mini-Bild der OBS-Szene über den WebSocket (kein Gerätekonflikt mit OBS)."""
+
+    def __init__(self, st, on_frame, on_scene, stop, log):
+        super().__init__(daemon=True)
+        self.st, self.on_frame, self.on_scene, self.stop, self.log = st, on_frame, on_scene, stop, log
+
+    def run(self):
+        try:
+            from PIL import Image
+            import io
+        except ImportError:
+            self.log("   ❌ Pillow fehlt – App einmal neu starten (wird automatisch installiert).")
+            return
+        first = True
+        while not self.stop.is_set():
+            o = OBS(self.st.get("obs_port", 4455), self.st.get("obs_pw", ""))
+            try:
+                o.connect()
+                prev = None
+                while not self.stop.is_set():
+                    t0 = time.time()
+                    src = (self.st.get("cap_source") or "").strip() or \
+                        o.call("GetCurrentProgramScene").get("currentProgramSceneName", "")
+                    data = o.call("GetSourceScreenshot", {"sourceName": src, "imageFormat": "png",
+                                                          "imageWidth": VW, "imageHeight": VH})
+                    b64 = data.get("imageData", "").split(",", 1)[-1]
+                    img = Image.open(io.BytesIO(base64.b64decode(b64))).convert("RGB")
+                    if img.size != (VW, VH):
+                        img = img.resize((VW, VH))
+                    raw = img.tobytes()
+                    if first:
+                        self.log(f"   🎥 OBS-Bild verbunden („{src}“) – erkenne Cops, Explosionen, Blaulicht")
+                        first = False
+                    motion, red, blue, prev = analyze_video_frame(raw, prev)
+                    now = time.time()
+                    self.on_frame(now, motion, red, blue)
+                    self.on_scene(now, *scene_frame(raw))
+                    self.stop.wait(max(0.0, 0.25 - (time.time() - t0)))
+            except Exception as e:
+                if not self.stop.is_set():
+                    self.log(f"   ⚠ OBS-Bild nicht verfügbar ({str(e)[:100]}) – versuche es gleich nochmal …")
+            finally:
+                o.close()
+            self.stop.wait(10)
+
+
+class CaptureClipper(RemotePlayClipper):
+    """Clippt, was in OBS zu sehen ist (z. B. PS5 über Capture-Karte), wenn du NICHT live bist."""
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self.state_prefix = "🎥 Capture"
+
+    def _loop(self):
+        self.log("🎥 Capture-Clipper an – warte auf OBS …")
+        self.on_state("wartet auf OBS")
+        while not self.stop_all.is_set():
+            live = self.is_live()
+            ok = False
+            if not live:
+                o = OBS(self.st.get("obs_port", 4455), self.st.get("obs_pw", ""))
+                try:
+                    o.connect()
+                    o.call("GetVersion")
+                    ok = True
+                except Exception:
+                    ok = False
+                finally:
+                    o.close()
+            if ok and not self.stream_stop:
+                self._begin_cap()
+            elif self.stream_stop and not ok:
+                self._end()
+            self.stop_all.wait(15)
+        if self.stream_stop:
+            self._end()
+        self.on_state("aus")
+
+    def _begin_cap(self):
+        date = time.strftime("%Y-%m-%d")
+        self.stream = {"id": f"cap-{date}", "title": f"PS5 Capture {date}",
+                       "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+        self.count = 0
+        self.stream_stop = threading.Event()
+        ok, txt = obs_check(self.st.get("obs_port", 4455), self.st.get("obs_pw", ""))
+        self.log(f"🎥 OBS gefunden – ich schaue das Bild mit. {'✅ ' if ok else '⚠ '}{txt}")
+        self.on_state("🎥 Capture – 0 Clips")
+        det = Detector(self.st.get("channel", "x"), self.st.get("keywords", core.DEFAULT_KEYWORDS), "Mittel",
+                       cooldown=60, warmup=90)
+        self.det = det
+        OBSFrameReader(self.st, det.add_frame, det.add_scene, self.stream_stop, self.log).start()
+        threading.Thread(target=self._detect, args=(det, None), daemon=True).start()
+
+    def _end(self):
+        self.stream_stop.set()
+        self.stream_stop = None
+        self.log(f"⚫ Capture-Clipper pausiert – {self.count} Clip(s) erstellt.")
+        self.on_state(f"wartet auf OBS (letztes Mal: {self.count} Clips)")
+        try:
+            self.on_end(dict(self.stream or {}))
+        except Exception:
+            pass

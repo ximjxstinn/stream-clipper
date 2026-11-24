@@ -34,7 +34,7 @@ except ImportError:  # ältere Updater kennen live_clipper.py noch nicht → sel
     except Exception:
         live_clipper = None
 
-VERSION = "4.5"
+VERSION = "4.7"
 
 # Fertige Live-Profile für GTA 6 (jederzeit umschaltbar, gilt sofort – auch mitten im Stream)
 _ALL = ("cops", "siren", "shots", "explosion", "bluelight", "vision", "game", "voice", "chat", "clipreq")
@@ -105,7 +105,7 @@ DEFAULTS = {
     "w_chat": 65, "audio": True, "fmt": FORMATS[2], "vstyle": "Blur-Hintergrund", "quality": "1080p",
     "bestof": False, "nomenu": True, "vis": True, "mode": "Maximal (alles Spannende)", "live_times": [], "keywords": core.DEFAULT_KEYWORDS,
     "outdir": os.path.join(os.path.expanduser("~"), "Videos", "Stream Clips"),
-    "auto": False, "seen": [], "autostart": False, "autoupdate": True, "last_session": "", "tray": True, "tray_hint_shown": False, "live_popup": True, "live_voice": 12, "live_trig": {}, "live_game": 6, "live_vis": 1.6, "live_gap": 60, "live_hour": 30, "live_shots": 4, "live_chase": 3, "rp": False, "watch": False, "watch_dir": os.path.join(os.path.expanduser("~"), "Videos", "PS5 Aufnahmen"), "watch_since": 0, "watch_done": [], "obs_port": 4455, "obs_pw": "", "rp_post": 8, "live_rate": True, "live_rate_min": 35, "live_drop": "keep", "live_auto": "approve", "live_profile": "", "live_profiles": {}, "live": False, "live_sens": "Maximal (alles Spannende)", "live_len": 30, "live_max": 100, "win_zoomed": True, "win_geo": "",
+    "auto": False, "seen": [], "autostart": False, "autoupdate": True, "last_session": "", "tray": True, "tray_hint_shown": False, "live_popup": True, "live_voice": 12, "live_trig": {}, "live_game": 6, "live_vis": 1.6, "live_gap": 60, "live_hour": 30, "live_shots": 4, "live_chase": 3, "rp": False, "rp_mode": "self", "cap": False, "cap_source": "", "watch": False, "watch_dir": os.path.join(os.path.expanduser("~"), "Videos", "PS5 Aufnahmen"), "watch_since": 0, "watch_done": [], "obs_port": 4455, "obs_pw": "", "rp_post": 8, "live_rate": True, "live_rate_min": 35, "live_drop": "keep", "live_auto": "approve", "live_profile": "", "live_profiles": {}, "live": False, "live_sens": "Maximal (alles Spannende)", "live_len": 30, "live_max": 100, "win_zoomed": True, "win_geo": "",
 }
 
 
@@ -204,10 +204,13 @@ class App:
             self.root.after(2500, lambda: self.check_updates(silent=True))
         self.live = None
         self.rp = None
+        self.cap = None
         if self.s.get("live"):
             self.root.after(4000, self._toggle_live)
         if self.s.get("rp"):
             self.root.after(5000, self._toggle_rp)
+        if self.s.get("cap"):
+            self.root.after(5500, self._toggle_cap)
         self._watch_sizes = {}
         self.root.after(15000, self._watch_tick)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close_button)
@@ -475,9 +478,17 @@ class App:
             row=r, column=0, columnspan=3, sticky="we", pady=(4, 2))
         r += 1
         self.v_rp = tk.BooleanVar(value=s.get("rp", False))
-        ttk.Checkbutton(left, text="🎮 Auch ohne Stream clippen (PS Remote Play + OBS)", variable=self.v_rp,
+        ttk.Checkbutton(left, text="🎮 Auch ohne Stream clippen (PS Remote Play)", variable=self.v_rp,
                         command=self._toggle_rp).grid(row=r, column=0, columnspan=2, sticky="w", pady=(4, 0))
-        ttk.Button(left, text="OBS …", command=self.obs_settings).grid(row=r, column=2, sticky="e", pady=(4, 0))
+        ttk.Button(left, text="Einstellen …", command=self.obs_settings).grid(row=r, column=2, sticky="e", pady=(4, 0))
+        r += 1
+        self.v_cap = tk.BooleanVar(value=s.get("cap", False))
+        ttk.Checkbutton(left, text="🎥 Capture-Karte / OBS-Bild ohne Stream clippen", variable=self.v_cap,
+                        command=self._toggle_cap).grid(row=r, column=0, columnspan=3, sticky="w", pady=(4, 0))
+        r += 1
+        self.v_cap_state = tk.StringVar(value="aus")
+        ttk.Label(left, textvariable=self.v_cap_state, style="Muted.TLabel").grid(row=r, column=0, columnspan=3,
+                                                                                  sticky="w")
         r += 1
         self.v_watch = tk.BooleanVar(value=s.get("watch", False))
         ttk.Checkbutton(left, text="📂 Neue PS5-Aufnahmen im Ordner automatisch clippen", variable=self.v_watch,
@@ -648,7 +659,7 @@ class App:
             "keywords": self.t_kw.get("1.0", "end").strip(), "outdir": self.v_out.get().strip() or DEFAULTS["outdir"],
             "auto": bool(self.v_auto.get()), "autostart": bool(self.v_autostart.get()),
             "autoupdate": bool(self.v_autoupdate.get()), "tray": bool(self.v_tray.get()),
-            "live": bool(self.v_live.get()), "rp": bool(self.v_rp.get()),
+            "live": bool(self.v_live.get()), "rp": bool(self.v_rp.get()), "cap": bool(self.v_cap.get()),
             "live_sens": ("Maximal (alles Spannende)" if self.v_mode.get().startswith("Maximal") else "Mittel"),
             "live_popup": bool(self.v_live_popup.get()), "live_voice": num(self.v_live_voice, 12), "live_len": num(self.v_live_len, 30),
         })
@@ -657,6 +668,8 @@ class App:
             self.live.st.update(self._live_settings())
         if getattr(self, "rp", None):
             self.rp.st.update(self._live_settings())
+        if getattr(self, "cap", None):
+            self.cap.st.update(self._live_settings())
         if hasattr(self, "v_live_profile"):
             self._mark_custom()
         return dict(s)
@@ -1144,6 +1157,42 @@ class App:
         else:
             self._full_auto_job(src, st)
 
+    def _toggle_cap(self):
+        on = bool(self.v_cap.get())
+        if on and self.v_rp.get():
+            self.v_rp.set(False)  # entweder Remote-Play-Fenster ODER OBS-Bild – nicht beides
+            self._toggle_rp()
+        self.settings()
+        if self.cap:
+            self.cap.stop()
+            self.cap = None
+        if not on:
+            self.v_cap_state.set("aus")
+            return
+        if not live_clipper or not hasattr(live_clipper, "CaptureClipper"):
+            self.log("❌ live_clipper.py zu alt – bitte „Nach Updates suchen“.")
+            return
+        if not self.s.get("obs_pw") and not self.s.get("obs_ok"):
+            self.obs_settings()
+
+        def start():
+            self.cap = live_clipper.CaptureClipper(
+                self._live_settings(), self.log,
+                on_clip=lambda stream, h: self.ui(lambda: self._add_live_clip(stream, h)),
+                on_state=lambda txt: self.ui(lambda: self.v_cap_state.set(txt)),
+                notify=self.notify,
+                is_live=lambda: bool(self.live and self.live.stream_stop))
+            self.cap.on_end = lambda stream: self.ui(lambda: self._live_stream_ended(stream))
+            self.cap.start()
+
+        def threaded_ensure():
+            try:
+                core.ensure_tools(self.log, core.Runner(self.log))
+            except Exception as e:
+                self.log(f"⚠ Tools: {e}")
+            self.ui(start)
+        threading.Thread(target=threaded_ensure, daemon=True).start()
+
     def _toggle_rp(self):
         on = bool(self.v_rp.get())
         self.settings()
@@ -1153,13 +1202,16 @@ class App:
         if not on:
             self.v_rp_state.set("aus")
             return
+        if self.v_cap.get():
+            self.v_cap.set(False)
+            self._toggle_cap()
         if not live_clipper or not hasattr(live_clipper, "RemotePlayClipper"):
             self.log("❌ live_clipper.py zu alt – bitte „Nach Updates suchen“.")
             return
         if os.name != "nt":
             self.v_rp_state.set("geht nur unter Windows")
             return
-        if not self.s.get("obs_pw") and not self.s.get("obs_ok"):
+        if self.s.get("rp_mode", "self") == "obs" and not self.s.get("obs_pw") and not self.s.get("obs_ok"):
             self.obs_settings()
 
         def start():
@@ -1177,18 +1229,28 @@ class App:
                 core.ensure_tools(self.log, core.Runner(self.log))
             except Exception as e:
                 self.log(f"⚠ Tools: {e}")
+            if self.s.get("rp_mode", "self") == "self":
+                try:
+                    import soundcard  # noqa: F401  (Ton von Lautsprecher/Headset mitschneiden)
+                except Exception:
+                    self.log("🔊 Installiere einmalig die Ton-Aufnahme (soundcard) …")
+                    try:
+                        self._pip("soundcard", "numpy")
+                    except Exception as e:
+                        self.log(f"⚠ Ton-Aufnahme nicht installierbar ({e}) – Clips dann ohne Ton.")
             self.ui(start)
         threading.Thread(target=threaded_ensure, daemon=True).start()
 
     def obs_settings(self):
         win = tk.Toplevel(self.root)
-        win.title("OBS für Remote-Play-Clips")
+        win.title("Remote Play / Capture-Karte / OBS")
         win.configure(bg=BG)
         win.transient(self.root)
         f = ttk.Frame(win, style="Panel.TFrame", padding=16)
         f.pack(fill="both", expand=True, padx=12, pady=12)
         steps = ("So geht's (einmalig):\n"
-                 "1. In OBS eine Quelle „Fensteraufnahme“ → Fenster „PS Remote Play“ (Ton: „Audio von Fenster aufnehmen“).\n"
+                 "1. Remote Play: in OBS eine „Fensteraufnahme“ → Fenster „PS Remote Play“ (mit Ton).\n"
+                 "   Capture-Karte: in OBS „Videoaufnahmegerät“ → deine Capture-Karte (Ton über die Karte).\n"
                  "2. OBS → Einstellungen → Ausgabe → Wiederholungspuffer: „aktivieren“, Max. Zeit 40 Sek.\n"
                  "3. OBS → Werkzeuge → WebSocket-Servereinstellungen → „WebSocket-Server aktivieren“,\n"
                  "   dann „Verbindungsinformationen anzeigen“ → Passwort hier einfügen.\n"
@@ -1196,15 +1258,28 @@ class App:
                  "   Die App schaut das Fenster mit und lässt OBS bei Cops/Explosionen den Clip speichern.")
         ttk.Label(f, text=steps, style="Panel.TLabel", justify="left").grid(row=0, column=0, columnspan=3,
                                                                            sticky="w", pady=(0, 10))
+        v_mode = tk.StringVar(value=self.s.get("rp_mode", "self"))
+        mf = ttk.Frame(f, style="Panel.TFrame")
+        mf.grid(row=8, column=0, columnspan=3, sticky="w", pady=(10, 0))
+        ttk.Label(mf, text="PS Remote Play aufnehmen mit:", style="Panel.TLabel").pack(anchor="w")
+        ttk.Radiobutton(mf, text="der App selbst (ohne OBS – Fenster + Ton vom PC)", value="self",
+                        variable=v_mode).pack(anchor="w")
+        ttk.Radiobutton(mf, text="OBS-Wiederholungspuffer (Schritte oben)", value="obs", variable=v_mode).pack(anchor="w")
         v_port = tk.IntVar(value=int(self.s.get("obs_port", 4455)))
         v_pw = tk.StringVar(value=self.s.get("obs_pw", ""))
         v_post = tk.IntVar(value=int(self.s.get("rp_post", 8)))
+        v_csrc = tk.StringVar(value=self.s.get("cap_source", ""))
         ttk.Label(f, text="Port", style="Panel.TLabel").grid(row=1, column=0, sticky="w")
         ttk.Entry(f, textvariable=v_port, width=8).grid(row=1, column=1, sticky="w", padx=8)
         ttk.Label(f, text="Passwort", style="Panel.TLabel").grid(row=2, column=0, sticky="w", pady=4)
         ttk.Entry(f, textvariable=v_pw, width=30, show="•").grid(row=2, column=1, columnspan=2, sticky="w", padx=8)
         ttk.Label(f, text="Sek. nach dem Moment warten", style="Panel.TLabel").grid(row=3, column=0, sticky="w")
         ttk.Spinbox(f, from_=0, to=20, textvariable=v_post, width=6).grid(row=3, column=1, sticky="w", padx=8)
+        ttk.Label(f, text="Capture: OBS-Quelle/Szene", style="Panel.TLabel").grid(row=6, column=0, sticky="w", pady=4)
+        ttk.Entry(f, textvariable=v_csrc, width=30).grid(row=6, column=1, columnspan=2, sticky="w", padx=8)
+        ttk.Label(f, text="leer = die Szene, die gerade in OBS läuft (sonst Name der Capture-Karten-Quelle, "
+                          "z. B. „Elgato“ – dann sieht die App nur das Spiel, ohne Overlays)",
+                  style="Muted.TLabel", wraplength=480).grid(row=7, column=0, columnspan=3, sticky="w")
         v_res = tk.StringVar(value="")
         ttk.Label(f, textvariable=v_res, style="Muted.TLabel", wraplength=480).grid(row=5, column=0, columnspan=3,
                                                                                    sticky="w", pady=(8, 0))
@@ -1219,7 +1294,15 @@ class App:
                 self.s["rp_post"] = int(v_post.get())
             except Exception:
                 self.s["rp_post"] = 8
+            self.s["cap_source"] = v_csrc.get().strip()
+            changed = self.s.get("rp_mode", "self") != v_mode.get()
+            self.s["rp_mode"] = v_mode.get()
             self.save()
+            if changed and self.rp:
+                self.log("🎮 Remote-Play-Aufnahme umgestellt – starte neu …")
+                self._toggle_rp()
+            if self.cap:
+                self.cap.st.update(self._live_settings())
             if self.rp:
                 self.rp.st.update(self._live_settings())
 
@@ -1525,6 +1608,8 @@ class App:
             self.live.stop()
         if self.rp:
             self.rp.stop()
+        if self.cap:
+            self.cap.stop()
         if self.runner:
             self.runner.cancel()
         if self.tray:

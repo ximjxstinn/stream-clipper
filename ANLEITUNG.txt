@@ -14,6 +14,15 @@ SO GEHT'S
   4. "Ausgewählte clippen" oder "Alle clippen"
   Oder einfach "Alles automatisch" = analysieren + alle Top-Clips schneiden.
 
+NEU IN 4.7 – PS REMOTE PLAY OHNE OBS + CAPTURE-KARTE
+  - „🎮 Auch ohne Stream clippen (PS Remote Play)“ braucht kein OBS mehr: Die App nimmt das Remote-Play-Fenster
+    selbst auf (immer die letzten ~2 Min.) und den Ton von deinem PC (Lautsprecher/Headset – also auch Discord,
+    Musik usw.). Bei Cops/Explosionen speichert sie die letzten Sekunden als Clip (+ TikTok-Version).
+    Umstellen auf OBS: „Einstellen …“ → „OBS-Wiederholungspuffer“.
+  - „🎥 Capture-Karte / OBS-Bild ohne Stream clippen“: Die App holt sich das Bild von OBS (keine Konflikte mit
+    der Capture-Karte); OBS speichert den Clip über den Wiederholungspuffer.
+  - Wenn du live gehst, übernimmt automatisch der normale Live-Clipper.
+
 NEU IN 4.5 – 📂 PS5-AUFNAHMEN AUTOMATISCH AUS EINEM ORDNER
   - Haken „📂 Neue PS5-Aufnahmen im Ordner automatisch clippen“ (Standard-Ordner: Videos\PS5 Aufnahmen).
   - Sobald dort ein neues Video landet (USB-Stick reinkopiert, aus der PS App gespeichert, OneDrive-Sync …),

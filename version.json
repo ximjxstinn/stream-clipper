@@ -1,6 +1,6 @@
 {
-  "version": "4.5",
-  "notes": "Ordner beobachten: neue PS5-Aufnahmen werden automatisch geclippt",
+  "version": "4.7",
+  "notes": "PS Remote Play ohne OBS (App nimmt selbst auf) + Capture-Karte über OBS",
   "files": [
     "StreamClipper.pyw",
     "clipper_core.py",
