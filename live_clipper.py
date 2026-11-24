@@ -33,7 +33,8 @@ IS_WIN = os.name == "nt"
 MAXIMAL = "Maximal (alles Spannende)"
 TRIGGERS = {  # Schlüssel: Anzeigename
     "siren": "🚨 Sirene / Alarm / Polizei (Ton)",
-    "shots": "🔫 Schüsse / Explosionen (mehrere Knalle)",
+    "shots": "🔫 Schüsse (mehrere Schüsse / Dauerfeuer)",
+    "explosion": "💥 Explosionen (lauter Bass-Knall)",
     "bluelight": "🚨 Blaulicht im Bild",
     "vision": "🎬 Action im Bild (viel Bewegung)",
     "game": "🎮 Spiel wird deutlich lauter",
@@ -289,6 +290,39 @@ def tone_peak(samples):
     return best_f, min(1.0, best_p / (n / 2.0 * total))
 
 
+TR_N = 80  # 10-ms-Hüllkurve für Schuss-Erkennung
+
+
+def count_transients(pcm, st):
+    """Zählt Schüsse in 0,1 s Ton: harter Anstieg (+10 dB in ≤30 ms) UND schnelles Abklingen (−8 dB in ≤80 ms).
+    Sprache steigt auch an, bleibt aber länger laut – das zählt nicht. st = Zustand über Blöcke hinweg."""
+    if not st:
+        st.extend([[-90.0, -90.0, -90.0], 99, None])
+    prev, since, pend = st
+    hits = 0
+    for i in range(0, len(pcm) - TR_N + 1, TR_N):
+        seg = pcm[i:i + TR_N]
+        e = 10 * math.log10(sum(x * x for x in seg) / TR_N + 1e-12)
+        since += 1
+        if pend is not None:
+            peak, age = pend
+            peak = max(peak, e) if age < 2 else peak
+            age += 1
+            if e <= peak - 8:
+                hits += 1
+                pend = None
+            elif age > 8:
+                pend = None
+            else:
+                pend = (peak, age)
+        if pend is None and e > -45 and e - min(prev) >= 10 and since >= 5:
+            pend = (e, 0)
+            since = 0
+        prev = prev[1:] + [e]
+    st[0], st[1], st[2] = prev, since, pend
+    return hits
+
+
 def analyze_audio_frame(pcm, hp_state):
     """pcm: 0,1 s float-Samples. Gibt (spiel_db, stimme_db, (tonhöhe, tonanteil)) zurück."""
     n = len(pcm)
@@ -383,6 +417,7 @@ class AudioReader(threading.Thread):
                                                  for l in iter(self.proc.stderr.readline, b"")],
                                  daemon=True).start()
                 hp = [0.0, 0.0]
+                tr_state = []
                 voice_sec, sec_key = [], None
                 while not self.stop.is_set():
                     raw = self.proc.stdout.read(FRAME * 2)
@@ -399,6 +434,7 @@ class AudioReader(threading.Thread):
                     game_db, voice_db, (tf, tr) = analyze_audio_frame(samples, hp)
                     self.on_db(now, game_db, "game")
                     self.on_db(now, game_db - voice_db, "low")
+                    self.on_db(now, count_transients(samples, tr_state), "hits")
                     self.on_tone(now, tf, tr)
                     k = int(now)
                     if sec_key is not None and k != sec_key and voice_sec:
@@ -535,6 +571,8 @@ class Detector:
         self.game = deque(maxlen=3000)    # (t, dB) ~10x pro Sekunde (5 Min.)
         self.tones = deque(maxlen=40)     # (t, tonhöhe, anteil) ~10x pro Sekunde
         self.low = deque(maxlen=60)       # (t, Bass-Anteil dB) – hoch = Knall/Explosion, niedrig = Sprache
+        self.hits = deque(maxlen=60)      # (t, Einschläge im 0,1-s-Block) – Schüsse
+        self.min_shots = 4
         self.enabled = {k: True for k in TRIGGERS}
         self.clip_times = deque()
         self.max_per_hour = 999
@@ -578,6 +616,8 @@ class Detector:
         with self.lock:
             if kind == "low":
                 self.low.append((t, v))
+            elif kind == "hits":
+                self.hits.append((t, v))
             else:
                 (self.game if kind == "game" else self.db).append((t, v))
 
@@ -622,6 +662,7 @@ class Detector:
                 voice_diff = min(last2) - norm
         action = None
         shots = 0
+        explosion = None
         if len(game) >= 1200:  # ~2 Minuten Spielton als Vergleich (sonst wirkt am Anfang alles "laut")
             acc = {}
             for t, v in game:
@@ -629,19 +670,30 @@ class Detector:
                 a[0] += v
                 a[1] += 1
             per_sec = {k: a[0] / a[1] for k, a in acc.items()}  # Mittelwert pro Sekunde
-            # Schüsse/Explosionen: mehrere kurze, sehr laute Knalle innerhalb von 3 s (ein einzelner Knall zählt nicht)
+            # Schüsse: mehrere harte Einschläge in 4 s (Dauerfeuer/Sturmgewehr oder mehrere Schüsse) – einzelner Schuss zählt nicht
             norm10 = self._median([v for _, v in game])
             with self.lock:
                 lows = {round(t, 1): v for t, v in self.low}
-            burst, prev_hi = 0, False
-            for t, v in game:
-                if t < now - 3:
+                hitd = {round(t, 1): h for t, h in self.hits}
+            g_recent = [(t, v) for t, v in game if t >= now - 4]
+            blocks = 0
+            local = self._median([v for _, v in g_recent]) if g_recent else norm10
+            for t, v in g_recent:
+                h = hitd.get(round(t, 1), 0)
+                # Schuss = deutlich lauter als das normale Spiel UND als die letzten Sekunden (Reden ist gleichmäßig laut)
+                if h and v - norm10 >= 8 and v - local >= 6 and lows.get(round(t, 1), 0.0) >= 2.0:
+                    shots += h
+                    blocks += 1
+            if blocks < 2:
+                shots = 0
+            # Explosion: ein sehr lauter Knall mit viel Bass, der danach noch grollt (≥0,5 s laut)
+            for idx, (t, v) in enumerate(g_recent):
+                if t > now - 0.6 or v - norm10 < 15 or lows.get(round(t, 1), 0.0) < 3.0:
                     continue
-                hi = v - norm10 >= 12 and lows.get(round(t, 1), 0.0) >= 1.5
-                if hi and not prev_hi:
-                    burst += 1
-                prev_hi = hi
-            shots = burst
+                tail = [x for _, x in g_recent[idx + 1:idx + 6]]
+                hits_near = sum(hitd.get(round(tt, 1), 0) for tt, _ in g_recent[idx:idx + 6])
+                if len(tail) >= 5 and min(tail) - norm10 >= 8 and hits_near <= 2:
+                    explosion = max(explosion or 0.0, v - norm10)
             norm_g = self._median(list(per_sec.values()))
             last2 = [per_sec[k] for k in range(int(now) - 2, int(now)) if k in per_sec]
             if len(last2) >= 2 and norm_g > -70:
@@ -662,6 +714,8 @@ class Detector:
         # Messwerte fürs Log (Maximum pro Minute)
         pk = self.peak
         pk["shots"] = max(pk.get("shots") or 0, shots)
+        if explosion is not None:
+            pk["boom"] = max(pk.get("boom") or 0.0, explosion)
         for key, val in (("siren", siren), ("blue", blue), ("vis", vis)):
             if val is not None:
                 pk[key] = val if pk.get(key) is None else max(pk[key], val)
@@ -689,6 +743,8 @@ class Detector:
             action = None
         if not en.get("shots", True):
             shots = 0
+        if not en.get("explosion", True):
+            explosion = None
         if not en.get("siren", True):
             siren = None
         if not en.get("bluelight", True):
@@ -714,9 +770,14 @@ class Detector:
         if warm and siren is not None and siren >= 1.2:
             kind = kind or "siren"
             reasons.insert(0, "🚨 Sirene / Alarm / Polizei")
-        if warm and shots >= 3:
+        if explosion is not None:
+            shots = 0  # Grollen einer Explosion nicht als Schüsse zählen
+        if warm and shots >= self.min_shots:
             kind = kind or "shots"
-            reasons.insert(0, f"🔫 Schüsse / Explosionen ({shots} Knalle)")
+            reasons.insert(0, f"🔫 Schüsse ({shots}× in 4 s)")
+        if warm and explosion is not None:
+            kind = kind or "explosion"
+            reasons.insert(0, f"💥 Explosion (+{explosion:.0f} dB)")
         if blue is not None and blue >= 1.0:
             kind = kind or "bluelight"
             reasons.insert(0, "🚨 Blaulicht im Bild")
@@ -837,6 +898,7 @@ class LiveClipper:
             det.t_vis = float(self.st.get("live_vis", det.t_vis))
             det.cooldown = max(20, int(self.st.get("live_gap", det.cooldown)))
             det.max_per_hour = max(1, int(self.st.get("live_hour", 999)))
+            det.min_shots = max(2, int(self.st.get("live_shots", 4)))
             trig = det.tick(time.time())
             if time.time() >= next_report:
                 next_report = time.time() + 60
@@ -846,7 +908,8 @@ class LiveClipper:
                 self.log(f"   📊 letzte Minute: Chat {pk['u']} Leute · Stimme {fmt(pk['voice'], 'dB')} "
                          f"(ab {'aus' if det.t_voice >= 999 else '+' + format(det.t_voice, '.0f')}) · Spiel {fmt(pk['action'], 'dB')} (ab +{det.t_action:.0f}) · "
                          f"Sirene {f2(pk.get('siren'))} (ab 1) · Blaulicht {f2(pk.get('blue'))} (ab 1) · "
-                         f"Bild ×{f2(pk.get('vis'))} (ab ×{det.t_vis}) · Knalle {pk.get('shots') or 0} (ab 3)")
+                         f"Bild ×{f2(pk.get('vis'))} (ab ×{det.t_vis}) · Schüsse {pk.get('shots') or 0} (ab {det.min_shots})"
+                         + (" · 💥 Explosion" if pk.get("boom") else ""))
                 det.peak = {"u": 0, "kw": 0, "voice": None, "action": None, "siren": None, "blue": None,
                             "vis": None}
             if not trig:

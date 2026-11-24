@@ -1,6 +1,6 @@
 {
-  "version": "3.5",
-  "notes": "Live-Clipper komplett einstellbar: Auslöser an/aus, Schwellen, Abstand, Clips pro Stunde",
+  "version": "3.6",
+  "notes": "Schüsse (erst ab mehreren / Dauerfeuer) und Explosionen getrennt erkennen, Schuss-Anzahl einstellbar",
   "files": [
     "StreamClipper.pyw",
     "clipper_core.py",

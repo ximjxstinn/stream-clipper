@@ -33,7 +33,7 @@ except ImportError:  # ältere Updater kennen live_clipper.py noch nicht → sel
     except Exception:
         live_clipper = None
 
-VERSION = "3.5"
+VERSION = "3.6"
 import sys
 SETTINGS_FILE = os.path.join(core.APP_DIR, "settings.json")
 SESSION_DIR = os.path.join(core.APP_DIR, "gespeichert")
@@ -58,7 +58,7 @@ DEFAULTS = {
     "w_chat": 65, "audio": True, "fmt": FORMATS[2], "vstyle": "Blur-Hintergrund", "quality": "1080p",
     "bestof": False, "nomenu": True, "vis": True, "mode": "Maximal (alles Spannende)", "live_times": [], "keywords": core.DEFAULT_KEYWORDS,
     "outdir": os.path.join(os.path.expanduser("~"), "Videos", "Stream Clips"),
-    "auto": False, "seen": [], "autostart": False, "autoupdate": True, "last_session": "", "tray": True, "tray_hint_shown": False, "live_popup": True, "live_voice": 12, "live_trig": {}, "live_game": 6, "live_vis": 1.6, "live_gap": 60, "live_hour": 30, "live": False, "live_sens": "Maximal (alles Spannende)", "live_len": 30, "live_max": 100, "win_zoomed": True, "win_geo": "",
+    "auto": False, "seen": [], "autostart": False, "autoupdate": True, "last_session": "", "tray": True, "tray_hint_shown": False, "live_popup": True, "live_voice": 12, "live_trig": {}, "live_game": 6, "live_vis": 1.6, "live_gap": 60, "live_hour": 30, "live_shots": 4, "live": False, "live_sens": "Maximal (alles Spannende)", "live_len": 30, "live_max": 100, "win_zoomed": True, "win_geo": "",
 }
 
 
@@ -767,6 +767,7 @@ class App:
             ("Spiel lauter als normal ab (+dB)", "live_game", 6, 2, 20, "kleiner = mehr Clips"),
             ("Bewegung im Bild ab (× normal, ×10)", "live_vis", 16, 12, 40, "16 = ×1,6 · 25 = ×2,5"),
             ("Stimme ab (+dB, 0 = aus)", "live_voice", 12, 0, 30, "12 = Rufen · 15 = Schreien"),
+            ("Schüsse: mindestens so viele in 4 Sek.", "live_shots", 4, 2, 20, "Sturmgewehr-Salve = 8–10+"),
             ("Mindestabstand zwischen Clips (Sek.)", "live_gap", 60, 20, 600, "größer = weniger Clips"),
             ("Höchstens Clips pro Stunde", "live_hour", 30, 1, 200, ""),
         ]
@@ -783,8 +784,9 @@ class App:
             r += 1
 
         def preset(level):
-            vals = {"wenig": (10, 25, 15, 180, 10), "mittel": (6, 16, 12, 60, 30), "viel": (4, 14, 8, 30, 80)}[level]
-            for (key, v) in zip(("live_game", "live_vis", "live_voice", "live_gap", "live_hour"), vals):
+            vals = {"wenig": (10, 25, 15, 180, 10, 8), "mittel": (6, 16, 12, 60, 30, 4),
+                    "viel": (4, 14, 8, 30, 80, 3)}[level]
+            for (key, v) in zip(("live_game", "live_vis", "live_voice", "live_gap", "live_hour", "live_shots"), vals):
                 ents[key].set(v)
         pf = ttk.Frame(f, style="Panel.TFrame")
         pf.grid(row=r, column=0, columnspan=3, sticky="w", pady=(8, 0))
@@ -805,6 +807,7 @@ class App:
             self.s["live_voice"] = gi("live_voice", 12)
             self.s["live_gap"] = gi("live_gap", 60)
             self.s["live_hour"] = gi("live_hour", 30)
+            self.s["live_shots"] = gi("live_shots", 4)
             self.v_live_voice.set(self.s["live_voice"])
             self.settings()
             self.log("✔ Live-Auslöser gespeichert – gilt sofort, auch mitten im Stream.")

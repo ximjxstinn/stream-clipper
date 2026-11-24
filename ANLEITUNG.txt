@@ -14,6 +14,13 @@ SO GEHT'S
   4. "Ausgewählte clippen" oder "Alle clippen"
   Oder einfach "Alles automatisch" = analysieren + alle Top-Clips schneiden.
 
+NEU IN 3.6 – SCHÜSSE UND EXPLOSIONEN GETRENNT
+  - 🔫 Schüsse: zählt jeden einzelnen Schuss (harter Knall, der sofort wieder abklingt).
+    Geclippt wird erst ab mehreren Schüssen in 4 Sekunden (Standard 4) – z. B. Sturmgewehr-Salve
+    oder mehrere Schüsse hintereinander. 1–2 Einzelschüsse lösen nicht aus. Anzahl einstellbar.
+  - 💥 Explosionen: eigener Auslöser – sehr lauter Bass-Knall, der danach noch grollt.
+  - Beide in „⚙ Live-Auslöser einstellen“ einzeln an/aus. Reden zählt nicht als Schuss.
+
 NEU IN 3.5 – LIVE-CLIPPER EINSTELLBAR
   - Button „⚙ Live-Auslöser einstellen“: jeden Auslöser einzeln an/aus
     (Sirene, Schüsse, Blaulicht, Action im Bild, Spiel lauter, Stimme, Chat-Hype, „!clip“).
