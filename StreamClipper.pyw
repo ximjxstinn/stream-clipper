@@ -33,7 +33,7 @@ except ImportError:  # ältere Updater kennen live_clipper.py noch nicht → sel
     except Exception:
         live_clipper = None
 
-VERSION = "3.4.2"
+VERSION = "3.5"
 import sys
 SETTINGS_FILE = os.path.join(core.APP_DIR, "settings.json")
 SESSION_DIR = os.path.join(core.APP_DIR, "gespeichert")
@@ -58,7 +58,7 @@ DEFAULTS = {
     "w_chat": 65, "audio": True, "fmt": FORMATS[2], "vstyle": "Blur-Hintergrund", "quality": "1080p",
     "bestof": False, "nomenu": True, "vis": True, "mode": "Maximal (alles Spannende)", "live_times": [], "keywords": core.DEFAULT_KEYWORDS,
     "outdir": os.path.join(os.path.expanduser("~"), "Videos", "Stream Clips"),
-    "auto": False, "seen": [], "autostart": False, "autoupdate": True, "last_session": "", "tray": True, "tray_hint_shown": False, "live_popup": True, "live_voice": 10, "live": False, "live_sens": "Maximal (alles Spannende)", "live_len": 30, "live_max": 100, "win_zoomed": True, "win_geo": "",
+    "auto": False, "seen": [], "autostart": False, "autoupdate": True, "last_session": "", "tray": True, "tray_hint_shown": False, "live_popup": True, "live_voice": 12, "live_trig": {}, "live_game": 6, "live_vis": 1.6, "live_gap": 60, "live_hour": 30, "live": False, "live_sens": "Maximal (alles Spannende)", "live_len": 30, "live_max": 100, "win_zoomed": True, "win_geo": "",
 }
 
 
@@ -85,6 +85,11 @@ class App:
             if extra:
                 self.s["keywords"] = (self.s.get("keywords", "").rstrip(", ") + ", " + ", ".join(extra)).strip(", ")
             self.s["mig_31"] = True
+            self.save()
+        if not self.s.get("mig_35"):
+            if int(self.s.get("live_voice", 12) or 0) < 12:
+                self.s["live_voice"] = 12  # normales Reden soll nicht mehr clippen
+            self.s["mig_35"] = True
             self.save()
         if not self.s.get("mig_332"):
             self.s["vstyle"] = "Mitte zuschneiden"
@@ -384,7 +389,7 @@ class App:
         r += 1
         ttk.Label(left, text="Stimme clippt ab +dB (0 = aus)", style="Panel.TLabel").grid(row=r, column=0,
                                                                                          columnspan=2, sticky="w", pady=2)
-        self.v_live_voice = tk.IntVar(value=s.get("live_voice", 10))
+        self.v_live_voice = tk.IntVar(value=s.get("live_voice", 12))
         sb_voice = ttk.Spinbox(left, from_=0, to=30, textvariable=self.v_live_voice, width=6, command=self.settings)
         sb_voice.grid(row=r, column=2, sticky="e")
         sb_voice.bind("<Return>", lambda e: self.settings())
@@ -392,6 +397,9 @@ class App:
         r += 1
         ttk.Label(left, text="5 = schon lautes Reden · 10 = Rufen/Lachen · 15 = nur Schreien · 0 = Stimme egal",
                   style="Muted.TLabel", wraplength=380).grid(row=r, column=0, columnspan=3, sticky="w")
+        r += 1
+        ttk.Button(left, text="⚙ Live-Auslöser einstellen (was & wie oft) …", command=self.live_trigger_settings).grid(
+            row=r, column=0, columnspan=3, sticky="we", pady=(4, 2))
         r += 1
         self.v_live_popup = tk.BooleanVar(value=s.get("live_popup", True))
         ttk.Checkbutton(left, text="Vorschau-Popup bei jedem neuen Live-Clip", variable=self.v_live_popup,
@@ -548,7 +556,7 @@ class App:
             "auto": bool(self.v_auto.get()), "autostart": bool(self.v_autostart.get()),
             "autoupdate": bool(self.v_autoupdate.get()), "tray": bool(self.v_tray.get()),
             "live": bool(self.v_live.get()), "live_sens": self.v_live_sens.get(),
-            "live_popup": bool(self.v_live_popup.get()), "live_voice": num(self.v_live_voice, 10), "live_len": num(self.v_live_len, 30),
+            "live_popup": bool(self.v_live_popup.get()), "live_voice": num(self.v_live_voice, 12), "live_len": num(self.v_live_len, 30),
         })
         self.save()
         if getattr(self, "live", None):
@@ -733,6 +741,76 @@ class App:
                     self.ui(lambda: status.set("❌ fehlgeschlagen – siehe Log"))
             threading.Thread(target=job, daemon=True).start()
         ttk.Button(f, text="Verbinden", style="Accent.TButton", command=go).pack(anchor="e")
+
+    def live_trigger_settings(self):
+        trig_names = live_clipper.TRIGGERS if live_clipper else {}
+        cur = dict(self.s.get("live_trig") or {})
+        win = tk.Toplevel(self.root)
+        win.title("Live-Auslöser")
+        win.configure(bg=BG)
+        win.transient(self.root)
+        f = ttk.Frame(win, style="Panel.TFrame", padding=16)
+        f.pack(fill="both", expand=True, padx=12, pady=12)
+        f.columnconfigure(1, weight=1)
+        ttk.Label(f, text="Was soll einen Live-Clip auslösen?", style="Sec.TLabel").grid(row=0, column=0, columnspan=3,
+                                                                                         sticky="w", pady=(0, 6))
+        vars_ = {}
+        r = 1
+        for key, name in trig_names.items():
+            vars_[key] = tk.BooleanVar(value=cur.get(key, True))
+            ttk.Checkbutton(f, text=name, variable=vars_[key]).grid(row=r, column=0, columnspan=3, sticky="w")
+            r += 1
+        ttk.Label(f, text="Wie empfindlich / wie oft?", style="Sec.TLabel").grid(row=r, column=0, columnspan=3,
+                                                                                  sticky="w", pady=(12, 6))
+        r += 1
+        fields = [
+            ("Spiel lauter als normal ab (+dB)", "live_game", 6, 2, 20, "kleiner = mehr Clips"),
+            ("Bewegung im Bild ab (× normal, ×10)", "live_vis", 16, 12, 40, "16 = ×1,6 · 25 = ×2,5"),
+            ("Stimme ab (+dB, 0 = aus)", "live_voice", 12, 0, 30, "12 = Rufen · 15 = Schreien"),
+            ("Mindestabstand zwischen Clips (Sek.)", "live_gap", 60, 20, 600, "größer = weniger Clips"),
+            ("Höchstens Clips pro Stunde", "live_hour", 30, 1, 200, ""),
+        ]
+        ents = {}
+        for label, key, default, lo, hi, hint in fields:
+            val = self.s.get(key, default)
+            if key == "live_vis":
+                val = int(round(float(val) * 10))
+            ents[key] = tk.IntVar(value=int(val))
+            ttk.Label(f, text=label, style="Panel.TLabel").grid(row=r, column=0, sticky="w", pady=2)
+            ttk.Spinbox(f, from_=lo, to=hi, textvariable=ents[key], width=6).grid(row=r, column=1, sticky="w",
+                                                                                 padx=8)
+            ttk.Label(f, text=hint, style="Muted.TLabel").grid(row=r, column=2, sticky="w")
+            r += 1
+
+        def preset(level):
+            vals = {"wenig": (10, 25, 15, 180, 10), "mittel": (6, 16, 12, 60, 30), "viel": (4, 14, 8, 30, 80)}[level]
+            for (key, v) in zip(("live_game", "live_vis", "live_voice", "live_gap", "live_hour"), vals):
+                ents[key].set(v)
+        pf = ttk.Frame(f, style="Panel.TFrame")
+        pf.grid(row=r, column=0, columnspan=3, sticky="w", pady=(8, 0))
+        ttk.Label(pf, text="Schnell-Auswahl:", style="Panel.TLabel").pack(side="left")
+        for lvl, txt in (("wenig", "Wenig (nur Krasses)"), ("mittel", "Mittel"), ("viel", "Viel")):
+            ttk.Button(pf, text=txt, command=lambda l=lvl: preset(l)).pack(side="left", padx=4)
+        r += 1
+
+        def save():
+            def gi(k, d):
+                try:
+                    return int(float(ents[k].get()))
+                except Exception:
+                    return d
+            self.s["live_trig"] = {k: bool(v.get()) for k, v in vars_.items()}
+            self.s["live_game"] = gi("live_game", 6)
+            self.s["live_vis"] = gi("live_vis", 16) / 10.0
+            self.s["live_voice"] = gi("live_voice", 12)
+            self.s["live_gap"] = gi("live_gap", 60)
+            self.s["live_hour"] = gi("live_hour", 30)
+            self.v_live_voice.set(self.s["live_voice"])
+            self.settings()
+            self.log("✔ Live-Auslöser gespeichert – gilt sofort, auch mitten im Stream.")
+            win.destroy()
+        ttk.Button(f, text="Speichern (gilt sofort)", style="Accent.TButton", command=save).grid(
+            row=r, column=0, columnspan=3, sticky="e", pady=(12, 0))
 
     def _toggle_live(self):
         on = bool(self.v_live.get())

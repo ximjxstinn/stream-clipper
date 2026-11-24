@@ -14,6 +14,15 @@ SO GEHT'S
   4. "Ausgewählte clippen" oder "Alle clippen"
   Oder einfach "Alles automatisch" = analysieren + alle Top-Clips schneiden.
 
+NEU IN 3.5 – LIVE-CLIPPER EINSTELLBAR
+  - Button „⚙ Live-Auslöser einstellen“: jeden Auslöser einzeln an/aus
+    (Sirene, Schüsse, Blaulicht, Action im Bild, Spiel lauter, Stimme, Chat-Hype, „!clip“).
+  - Einstellbar: ab wie viel lauter das Spiel sein muss, wie viel Bewegung im Bild,
+    Stimm-Schwelle, Mindestabstand zwischen Clips und höchstens Clips pro Stunde.
+  - Schnell-Auswahl: Wenig / Mittel / Viel. Änderungen gelten sofort, auch mitten im Stream.
+  - Normales Reden löst nicht mehr aus (Stimme zählt erst ab 12 dB über deinem normalen Reden).
+  - „Schüsse“ brauchen jetzt echte Knalle mit Bass – Reden zählt nicht mehr als Schuss.
+
 NEU IN 3.4 – LIVE-CLIPPER ERKENNT JETZT ECHT
   - 🚨 Sirenen-Erkennung: sucht das typische Auf-und-Ab-Heulen (langsam und schnell) im Spielton –
     auch wenn die Sirene leise im Hintergrund ist. Musik und Sprache lösen nicht aus.

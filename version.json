@@ -1,6 +1,6 @@
 {
-  "version": "3.4.2",
-  "notes": "Live-Clipper: Stimm-Schwelle einstellbar (0 = Stimme aus)",
+  "version": "3.5",
+  "notes": "Live-Clipper komplett einstellbar: Auslöser an/aus, Schwellen, Abstand, Clips pro Stunde",
   "files": [
     "StreamClipper.pyw",
     "clipper_core.py",

@@ -31,6 +31,16 @@ SCOPES = "clips:edit"
 IS_WIN = os.name == "nt"
 
 MAXIMAL = "Maximal (alles Spannende)"
+TRIGGERS = {  # Schlüssel: Anzeigename
+    "siren": "🚨 Sirene / Alarm / Polizei (Ton)",
+    "shots": "🔫 Schüsse / Explosionen (mehrere Knalle)",
+    "bluelight": "🚨 Blaulicht im Bild",
+    "vision": "🎬 Action im Bild (viel Bewegung)",
+    "game": "🎮 Spiel wird deutlich lauter",
+    "voice": "🗣 Du schreist / rastest aus",
+    "chat": "💬 Chat-Hype (mehrere reagieren)",
+    "clipreq": "✂ Jemand schreibt „clip“ / „!clip“",
+}
 SENSITIVITY = {  # (Chat-Score, Stimme +dB, Spiel-Action +LU, min. Leute im Chat)
     MAXIMAL: (1.5, 10.0, 6.0, 2),
     "Hoch (mehr Clips)": (2.5, 7.0, 7.0, 3),
@@ -388,6 +398,7 @@ class AudioReader(threading.Thread):
                     now = time.time()
                     game_db, voice_db, (tf, tr) = analyze_audio_frame(samples, hp)
                     self.on_db(now, game_db, "game")
+                    self.on_db(now, game_db - voice_db, "low")
                     self.on_tone(now, tf, tr)
                     k = int(now)
                     if sec_key is not None and k != sec_key and voice_sec:
@@ -523,6 +534,10 @@ class Detector:
                                                                                      SENSITIVITY["Mittel"])
         self.game = deque(maxlen=3000)    # (t, dB) ~10x pro Sekunde (5 Min.)
         self.tones = deque(maxlen=40)     # (t, tonhöhe, anteil) ~10x pro Sekunde
+        self.low = deque(maxlen=60)       # (t, Bass-Anteil dB) – hoch = Knall/Explosion, niedrig = Sprache
+        self.enabled = {k: True for k in TRIGGERS}
+        self.clip_times = deque()
+        self.max_per_hour = 999
         self.frames = deque(maxlen=900)   # (t, bewegung, rot, blau) ~4x pro Sekunde
         self.cooldown, self.warmup = cooldown, warmup
         self.msgs = deque()       # (t, user, text, keyword-hits)
@@ -561,7 +576,10 @@ class Detector:
 
     def add_db(self, t, v, kind="voice"):
         with self.lock:
-            (self.game if kind == "game" else self.db).append((t, v))
+            if kind == "low":
+                self.low.append((t, v))
+            else:
+                (self.game if kind == "game" else self.db).append((t, v))
 
     @staticmethod
     def _median(vals):
@@ -597,7 +615,8 @@ class Detector:
             chat_score = (u15 - base) / math.sqrt(base + 2)
         voice_diff = None
         if len(dbs) >= 60:
-            norm = self._median([v for _, v in dbs])
+            srt = sorted(v for _, v in dbs)
+            norm = srt[int(len(srt) * 0.75)]  # dein normales Reden – nicht die Pausen
             last2 = [v for t, v in dbs if t >= now - 3][-2:]
             if len(last2) == 2:
                 voice_diff = min(last2) - norm
@@ -612,11 +631,13 @@ class Detector:
             per_sec = {k: a[0] / a[1] for k, a in acc.items()}  # Mittelwert pro Sekunde
             # Schüsse/Explosionen: mehrere kurze, sehr laute Knalle innerhalb von 3 s (ein einzelner Knall zählt nicht)
             norm10 = self._median([v for _, v in game])
+            with self.lock:
+                lows = {round(t, 1): v for t, v in self.low}
             burst, prev_hi = 0, False
             for t, v in game:
                 if t < now - 3:
                     continue
-                hi = v - norm10 >= 12
+                hi = v - norm10 >= 12 and lows.get(round(t, 1), 0.0) >= 1.5
                 if hi and not prev_hi:
                     burst += 1
                 prev_hi = hi
@@ -624,7 +645,10 @@ class Detector:
             norm_g = self._median(list(per_sec.values()))
             last2 = [per_sec[k] for k in range(int(now) - 2, int(now)) if k in per_sec]
             if len(last2) >= 2 and norm_g > -70:
-                action = min(last2) - norm_g
+                with self.lock:
+                    lw = [v for t, v in self.low if t >= now - 2]
+                if lw and sum(lw) / len(lw) >= 2.0:
+                    action = min(last2) - norm_g
         # Sirene (Ton), Blaulicht + Action (Bild)
         siren = siren_score(tones) if len(tones) >= 20 else None
         recent_f = [x for x in frames if x[0] >= now - 3]
@@ -650,6 +674,27 @@ class Detector:
                  min(max(0.0, (voice_diff or 0) - 4.0) / 8.0, 3.0), min(u15 / max(1.0, mean) / 4.0, 2.0)]
         if now - self.last_clip < self.cooldown:
             return None
+        while self.clip_times and self.clip_times[0] < now - 3600:
+            self.clip_times.popleft()
+        if len(self.clip_times) >= self.max_per_hour:
+            return None
+        en = self.enabled
+        if not en.get("chat", True):
+            chat_score = 0.0
+        if not en.get("clipreq", True):
+            req_users = set()
+        if not en.get("voice", True):
+            voice_diff = None
+        if not en.get("game", True):
+            action = None
+        if not en.get("shots", True):
+            shots = 0
+        if not en.get("siren", True):
+            siren = None
+        if not en.get("bluelight", True):
+            blue = None
+        if not en.get("vision", True):
+            vis = None
         reasons, kind = [], None
         if req_users:
             kind = "clip"
@@ -681,6 +726,7 @@ class Detector:
         if not kind:
             return None
         self.last_clip = now
+        self.clip_times.append(now)
         with self.lock:
             self.clipreq.clear()
         sample = core._top_messages([m[2] for m in recent])
@@ -786,6 +832,11 @@ class LiveClipper:
             v = self.st.get("live_voice")
             if v is not None:
                 det.t_voice = float(v) if float(v) > 0 else 999.0
+            det.enabled.update(self.st.get("live_trig") or {})
+            det.t_action = float(self.st.get("live_game", det.t_action))
+            det.t_vis = float(self.st.get("live_vis", det.t_vis))
+            det.cooldown = max(20, int(self.st.get("live_gap", det.cooldown)))
+            det.max_per_hour = max(1, int(self.st.get("live_hour", 999)))
             trig = det.tick(time.time())
             if time.time() >= next_report:
                 next_report = time.time() + 60
