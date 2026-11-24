@@ -33,7 +33,7 @@ except ImportError:  # ältere Updater kennen live_clipper.py noch nicht → sel
     except Exception:
         live_clipper = None
 
-VERSION = "3.4.1"
+VERSION = "3.4.2"
 import sys
 SETTINGS_FILE = os.path.join(core.APP_DIR, "settings.json")
 SESSION_DIR = os.path.join(core.APP_DIR, "gespeichert")
@@ -58,7 +58,7 @@ DEFAULTS = {
     "w_chat": 65, "audio": True, "fmt": FORMATS[2], "vstyle": "Blur-Hintergrund", "quality": "1080p",
     "bestof": False, "nomenu": True, "vis": True, "mode": "Maximal (alles Spannende)", "live_times": [], "keywords": core.DEFAULT_KEYWORDS,
     "outdir": os.path.join(os.path.expanduser("~"), "Videos", "Stream Clips"),
-    "auto": False, "seen": [], "autostart": False, "autoupdate": True, "last_session": "", "tray": True, "tray_hint_shown": False, "live_popup": True, "live": False, "live_sens": "Maximal (alles Spannende)", "live_len": 30, "live_max": 100, "win_zoomed": True, "win_geo": "",
+    "auto": False, "seen": [], "autostart": False, "autoupdate": True, "last_session": "", "tray": True, "tray_hint_shown": False, "live_popup": True, "live_voice": 10, "live": False, "live_sens": "Maximal (alles Spannende)", "live_len": 30, "live_max": 100, "win_zoomed": True, "win_geo": "",
 }
 
 
@@ -382,6 +382,17 @@ class App:
         self.v_live_len = tk.IntVar(value=s.get("live_len", 30))
         ttk.Spinbox(left, from_=10, to=60, textvariable=self.v_live_len, width=6).grid(row=r, column=2, sticky="e")
         r += 1
+        ttk.Label(left, text="Stimme clippt ab +dB (0 = aus)", style="Panel.TLabel").grid(row=r, column=0,
+                                                                                         columnspan=2, sticky="w", pady=2)
+        self.v_live_voice = tk.IntVar(value=s.get("live_voice", 10))
+        sb_voice = ttk.Spinbox(left, from_=0, to=30, textvariable=self.v_live_voice, width=6, command=self.settings)
+        sb_voice.grid(row=r, column=2, sticky="e")
+        sb_voice.bind("<Return>", lambda e: self.settings())
+        sb_voice.bind("<FocusOut>", lambda e: self.settings())
+        r += 1
+        ttk.Label(left, text="5 = schon lautes Reden · 10 = Rufen/Lachen · 15 = nur Schreien · 0 = Stimme egal",
+                  style="Muted.TLabel", wraplength=380).grid(row=r, column=0, columnspan=3, sticky="w")
+        r += 1
         self.v_live_popup = tk.BooleanVar(value=s.get("live_popup", True))
         ttk.Checkbutton(left, text="Vorschau-Popup bei jedem neuen Live-Clip", variable=self.v_live_popup,
                         command=self.settings).grid(row=r, column=0, columnspan=3, sticky="w")
@@ -537,7 +548,7 @@ class App:
             "auto": bool(self.v_auto.get()), "autostart": bool(self.v_autostart.get()),
             "autoupdate": bool(self.v_autoupdate.get()), "tray": bool(self.v_tray.get()),
             "live": bool(self.v_live.get()), "live_sens": self.v_live_sens.get(),
-            "live_popup": bool(self.v_live_popup.get()), "live_len": num(self.v_live_len, 30),
+            "live_popup": bool(self.v_live_popup.get()), "live_voice": num(self.v_live_voice, 10), "live_len": num(self.v_live_len, 30),
         })
         self.save()
         if getattr(self, "live", None):

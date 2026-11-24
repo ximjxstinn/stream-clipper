@@ -782,6 +782,10 @@ class LiveClipper:
         next_report = time.time() + 60
         while stop and not stop.is_set():
             stop.wait(1)
+            # Stimm-Schwelle live aus den Einstellungen (0 = Stimme zählt gar nicht)
+            v = self.st.get("live_voice")
+            if v is not None:
+                det.t_voice = float(v) if float(v) > 0 else 999.0
             trig = det.tick(time.time())
             if time.time() >= next_report:
                 next_report = time.time() + 60
@@ -789,7 +793,7 @@ class LiveClipper:
                 fmt = lambda v, u: "—" if v is None else f"{v:+.0f} {u}"
                 f2 = lambda v: "—" if v is None else f"{v:.1f}"
                 self.log(f"   📊 letzte Minute: Chat {pk['u']} Leute · Stimme {fmt(pk['voice'], 'dB')} "
-                         f"(ab +{det.t_voice:.0f}) · Spiel {fmt(pk['action'], 'dB')} (ab +{det.t_action:.0f}) · "
+                         f"(ab {'aus' if det.t_voice >= 999 else '+' + format(det.t_voice, '.0f')}) · Spiel {fmt(pk['action'], 'dB')} (ab +{det.t_action:.0f}) · "
                          f"Sirene {f2(pk.get('siren'))} (ab 1) · Blaulicht {f2(pk.get('blue'))} (ab 1) · "
                          f"Bild ×{f2(pk.get('vis'))} (ab ×{det.t_vis}) · Knalle {pk.get('shots') or 0} (ab 3)")
                 det.peak = {"u": 0, "kw": 0, "voice": None, "action": None, "siren": None, "blue": None,

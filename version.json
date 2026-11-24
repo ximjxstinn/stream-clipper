@@ -1,6 +1,6 @@
 {
-  "version": "3.4.1",
-  "notes": "Live: nur noch Action – Sirene/Alarm, Schüsse, Blaulicht, Bild-Action; Reden löst nicht mehr aus",
+  "version": "3.4.2",
+  "notes": "Live-Clipper: Stimm-Schwelle einstellbar (0 = Stimme aus)",
   "files": [
     "StreamClipper.pyw",
     "clipper_core.py",
