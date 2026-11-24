@@ -1,6 +1,6 @@
 {
-  "version": "3.3",
-  "notes": "Neu: Szenen-Erkennung im Bild + Maximal-Modus – schneidet alles Spannende automatisch raus",
+  "version": "3.3.1",
+  "notes": "Fix: Live-Clipper hört den Ton jetzt immer mit (Action/Stimme)",
   "files": [
     "StreamClipper.pyw",
     "clipper_core.py",

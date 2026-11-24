@@ -488,8 +488,9 @@ class LiveClipper:
                        cooldown=(length + 2) if sens == MAXIMAL else max(30, length + 10),
                        warmup=60 if sens == MAXIMAL else 120)
         ChatReader(channel, det.add_msg, self.stream_stop, self.log).start()
-        if self.st.get("audio", True):
-            AudioReader(channel, det.add_db, self.stream_stop, self.log).start()
+        # Live immer mithören (Stimme + Spiel-Action) – unabhängig vom Haken für die VOD-Analyse
+        AudioReader(channel, det.add_db, self.stream_stop, self.log).start()
+        self.log("   🎧 höre Live-Ton mit (Stimme + Spiel-Action) · 💬 lese Chat mit")
         threading.Thread(target=self._detect, args=(det, uid), daemon=True).start()
 
     def _end(self):
