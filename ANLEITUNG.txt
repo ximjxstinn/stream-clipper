@@ -14,6 +14,13 @@ SO GEHT'S
   4. "Ausgewählte clippen" oder "Alle clippen"
   Oder einfach "Alles automatisch" = analysieren + alle Top-Clips schneiden.
 
+NEU IN 4.4 – „♪ AUF TIKTOK POSTEN“ (DIREKT, NACH TIKTOKS REGELN)
+  - Clip auswählen → „♪ Auf TikTok posten“: Vorschau, dein TikTok-Konto, Text + Hashtags (bearbeitbar),
+    Sichtbarkeit selbst wählen, Kommentare/Duett/Stitch, Werbe-Kennzeichnung, dann „Jetzt posten“.
+  - Direkt posten klappt, sobald TikTok deine App geprüft hat (vorher nur bei privatem Konto).
+    Bis dahin: „Als Entwurf schicken“.
+  - Automatische Uploads schicken TikTok-Clips immer als Entwurf (TikTok verlangt deine Bestätigung pro Post).
+
 NEU IN 4.3 – HASHTAGS AUTOMATISCH
   - Hashtags passend zum Clip: Cops → #gta6cops #verfolgungsjagd #polizei, Explosion → #explosion,
     Schüsse → #schießerei #shootout, Remote Play → #ps5, Heist im Streamtitel → #heist #überfall,

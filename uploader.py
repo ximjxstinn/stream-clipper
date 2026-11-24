@@ -399,6 +399,11 @@ def _tt_api(conf, endpoint, body):
     return data.get("data") or {}
 
 
+def tt_creator_info(conf):
+    """Wie tt_creator, aber mit Fehlermeldung (für das Posten-Fenster)."""
+    return _tt_api(conf, "/v2/post/publish/creator_info/query/", {})
+
+
 def tt_creator(conf):
     try:
         return _tt_api(conf, "/v2/post/publish/creator_info/query/", {})
@@ -414,29 +419,27 @@ def _tt_chunks(size):
     return chunk, size // chunk
 
 
-def tt_upload(conf, path, caption, log=print, cancel=None):
+def tt_upload(conf, path, caption, log=print, cancel=None, post=None):
+    """post=None → Entwurf in deine TikTok-App (automatische Uploads, TikTok verlangt deine Zustimmung pro Post).
+    post={...} → direkt posten mit den Angaben, die du im Posten-Fenster selbst gewählt hast."""
     size = os.path.getsize(path)
     chunk, count = _tt_chunks(size)
     source = {"source": "FILE_UPLOAD", "video_size": size, "chunk_size": chunk, "total_chunk_count": count}
-    data = None
-    if conf.get("tt_mode") == "direct":
-        info = tt_creator(conf)
-        opts = info.get("privacy_level_options") or ["SELF_ONLY"]
-        privacy = "PUBLIC_TO_EVERYONE" if "PUBLIC_TO_EVERYONE" in opts else opts[0]
+    if post:
+        info = {"title": caption[:2200], "privacy_level": post["privacy_level"],
+                "disable_comment": bool(post.get("disable_comment")), "disable_duet": bool(post.get("disable_duet")),
+                "disable_stitch": bool(post.get("disable_stitch")), "video_cover_timestamp_ms": 1000,
+                "brand_content_toggle": bool(post.get("brand_content_toggle")),
+                "brand_organic_toggle": bool(post.get("brand_organic_toggle"))}
         try:
-            data = _tt_api(conf, "/v2/post/publish/video/init/", {
-                "post_info": {"title": caption[:2200], "privacy_level": privacy, "disable_duet": False,
-                              "disable_comment": False, "disable_stitch": False, "video_cover_timestamp_ms": 1000},
-                "source_info": source})
+            data = _tt_api(conf, "/v2/post/publish/video/init/", {"post_info": info, "source_info": source})
         except TikTokError as e:
-            if e.code != "unaudited_client_can_only_post_to_private_accounts":
-                raise
-            # Ungeprüfte App + öffentliches Konto → automatisch auf Entwurf umstellen
-            log("      ℹ Direkt posten geht erst nach der TikTok-Prüfung – schicke den Clip als Entwurf "
-                "in deine TikTok-App (Modus dauerhaft auf 'Entwurf' umgestellt).")
-            conf["tt_mode"] = "draft"
-            save_conf(conf)
-    if data is None:
+            if e.code == "unaudited_client_can_only_post_to_private_accounts":
+                raise UploadError("TikTok hat deine App noch nicht geprüft – direkt posten geht erst nach der "
+                                  "Prüfung (oder wenn dein TikTok-Konto auf privat steht). Nimm bis dahin "
+                                  "„Als Entwurf schicken“.")
+            raise
+    else:
         try:
             data = _tt_api(conf, "/v2/post/publish/inbox/video/init/", {"source_info": source})
         except TikTokError as e:

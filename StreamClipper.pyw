@@ -33,7 +33,7 @@ except ImportError:  # ältere Updater kennen live_clipper.py noch nicht → sel
     except Exception:
         live_clipper = None
 
-VERSION = "4.3"
+VERSION = "4.4"
 
 # Fertige Live-Profile für GTA 6 (jederzeit umschaltbar, gilt sofort – auch mitten im Stream)
 _ALL = ("cops", "siren", "shots", "explosion", "bluelight", "vision", "game", "voice", "chat", "clipreq")
@@ -527,6 +527,8 @@ class App:
         self.b_view.pack(side="left", padx=(0, 6))
         self.b_up = ttk.Button(act, text="✅ Freigeben & hochladen", command=self.upload_selected)
         self.b_up.pack(side="left")
+        self.b_ttpost = ttk.Button(act, text="♪ Auf TikTok posten", command=self.tiktok_post_dialog)
+        self.b_ttpost.pack(side="left", padx=(6, 0))
         self.b_cancel = ttk.Button(act, text="Abbrechen", command=self.cancel, state="disabled")
         self.b_cancel.pack(side="left", padx=6)
         ttk.Label(act2, text="Bewerten:", foreground=MUTED).pack(side="left")
@@ -2130,6 +2132,199 @@ class App:
         self._work(self._upload_job, src, items, plats)
 
     # ----------------------------------------------------------------- Upload --
+    # ------------------------------------------------- TikTok: direkt posten (nach TikToks Regeln) --
+    TT_PRIVACY = {"PUBLIC_TO_EVERYONE": "Alle (öffentlich)", "MUTUAL_FOLLOW_FRIENDS": "Freunde",
+                  "FOLLOWER_OF_CREATOR": "Follower", "SELF_ONLY": "Nur ich (privat)"}
+
+    def tiktok_post_dialog(self):
+        if not uploader:
+            return
+        sel = [int(i) for i in self.tree.selection()]
+        if len(sel) != 1:
+            messagebox.showinfo("Auf TikTok posten", "Wähl genau einen Clip in der Liste aus.")
+            return
+        i = sel[0]
+        h = self.highlights[i]
+        files = h.get("files") or {}
+        path = files.get("tall") or files.get("wide")
+        if not path or not os.path.isfile(path):
+            messagebox.showinfo("Auf TikTok posten", "Der Clip ist noch nicht geschnitten.")
+            return
+        conf = uploader.load_conf()
+        if not (conf.get("tt_token") or {}).get("access_token"):
+            messagebox.showinfo("Auf TikTok posten", "TikTok ist nicht verbunden – erst im Upload-Fenster verbinden.")
+            return
+        title, _, tags = uploader.build_text(conf, (self.meta or {}).get("title"), i + 1, h.get("reason", ""))
+        tags = " ".join(t for t in tags.split() if t.lower() != "#shorts")
+
+        win = tk.Toplevel(self.root)
+        win.title("Auf TikTok posten")
+        win.configure(bg=BG)
+        win.transient(self.root)
+        f = ttk.Frame(win, style="Panel.TFrame", padding=16)
+        f.pack(fill="both", expand=True, padx=12, pady=12)
+        f.columnconfigure(1, weight=1)
+        v_who = tk.StringVar(value="Lade dein TikTok-Konto …")
+        ttk.Label(f, textvariable=v_who, style="Sec.TLabel").grid(row=0, column=0, columnspan=2, sticky="w")
+        prev_lbl = ttk.Label(f, text="Vorschau wird geladen …", style="Muted.TLabel")
+        prev_lbl.grid(row=1, column=0, columnspan=2, sticky="w", pady=6)
+        ttk.Button(f, text="▶ Ganzen Clip ansehen", command=lambda: os.startfile(path) if os.name == "nt" else None
+                   ).grid(row=2, column=0, sticky="w")
+        ttk.Label(f, text="Text (Titel + Hashtags)", style="Panel.TLabel").grid(row=3, column=0, sticky="nw", pady=(10, 0))
+        txt = tk.Text(f, height=4, width=56, bg=FIELD, fg=TEXT, insertbackground=TEXT, relief="flat",
+                      font=("Segoe UI", 9), wrap="word")
+        txt.insert("1.0", f"{title} {tags}".strip())
+        txt.grid(row=3, column=1, sticky="we", pady=(10, 0))
+        ttk.Label(f, text="Wer darf das sehen? *", style="Panel.TLabel").grid(row=4, column=0, sticky="w", pady=(10, 0))
+        v_priv = tk.StringVar(value="")  # TikTok-Regel: KEINE Voreinstellung
+        cb_priv = ttk.Combobox(f, textvariable=v_priv, state="readonly", width=24, values=[])
+        cb_priv.grid(row=4, column=1, sticky="w", pady=(10, 0))
+        ttk.Label(f, text="Erlauben:", style="Panel.TLabel").grid(row=5, column=0, sticky="w", pady=(8, 0))
+        inter = ttk.Frame(f, style="Panel.TFrame")
+        inter.grid(row=5, column=1, sticky="w", pady=(8, 0))
+        v_com, v_duet, v_stitch = tk.BooleanVar(value=False), tk.BooleanVar(value=False), tk.BooleanVar(value=False)
+        c_com = ttk.Checkbutton(inter, text="Kommentare", variable=v_com)
+        c_duet = ttk.Checkbutton(inter, text="Duett", variable=v_duet)
+        c_stitch = ttk.Checkbutton(inter, text="Stitch", variable=v_stitch)
+        for c in (c_com, c_duet, c_stitch):
+            c.pack(side="left", padx=(0, 10))
+        v_brand = tk.BooleanVar(value=False)
+        v_own, v_paid = tk.BooleanVar(value=False), tk.BooleanVar(value=False)
+        ttk.Checkbutton(f, text="Dieses Video bewirbt eine Marke, ein Produkt oder einen Service",
+                        variable=v_brand, command=lambda: upd()).grid(row=6, column=0, columnspan=2, sticky="w",
+                                                                      pady=(10, 0))
+        bf = ttk.Frame(f, style="Panel.TFrame")
+        bf.grid(row=7, column=0, columnspan=2, sticky="w", padx=(20, 0))
+        c_own = ttk.Checkbutton(bf, text="Deine Marke (z. B. dein Creator Code)", variable=v_own,
+                                command=lambda: upd())
+        c_paid = ttk.Checkbutton(bf, text="Markeninhalt (bezahlte Partnerschaft)", variable=v_paid,
+                                 command=lambda: upd())
+        c_own.pack(anchor="w")
+        c_paid.pack(anchor="w")
+        v_hint = tk.StringVar(value="")
+        ttk.Label(f, textvariable=v_hint, style="Muted.TLabel", wraplength=520).grid(row=8, column=0, columnspan=2,
+                                                                                     sticky="w", pady=(4, 0))
+        v_consent = tk.StringVar(value="Mit dem Posten stimmst du TikToks Music Usage Confirmation zu.")
+        ttk.Label(f, textvariable=v_consent, style="Panel.TLabel", wraplength=520).grid(
+            row=9, column=0, columnspan=2, sticky="w", pady=(12, 0))
+        v_status = tk.StringVar(value="")
+        ttk.Label(f, textvariable=v_status, style="Muted.TLabel", wraplength=520).grid(row=10, column=0, columnspan=2,
+                                                                                       sticky="w", pady=(6, 0))
+        btns = ttk.Frame(f, style="Panel.TFrame")
+        btns.grid(row=11, column=0, columnspan=2, sticky="we", pady=(12, 0))
+        b_post = ttk.Button(btns, text="♪ Jetzt auf TikTok posten", style="Accent.TButton", state="disabled")
+        b_post.pack(side="right")
+        b_draft = ttk.Button(btns, text="Als Entwurf schicken")
+        b_draft.pack(side="right", padx=6)
+        state = {"info": {}, "img": None}
+
+        def upd():
+            info = state["info"]
+            brand = v_brand.get()
+            for c in (c_own, c_paid):
+                c.configure(state="normal" if brand else "disabled")
+            if not brand:
+                v_own.set(False)
+                v_paid.set(False)
+            opts = list(info.get("privacy_level_options") or [])
+            names = [self.TT_PRIVACY.get(o, o) for o in opts]
+            if v_paid.get():  # Markeninhalt darf nicht privat sein
+                names = [n for n, o in zip(names, opts) if o != "SELF_ONLY"]
+                if v_priv.get() == self.TT_PRIVACY["SELF_ONLY"]:
+                    v_priv.set("")
+            cb_priv.configure(values=names)
+            hint = []
+            if brand and not (v_own.get() or v_paid.get()):
+                hint.append("Bitte wähle, ob es deine Marke oder Markeninhalt ist.")
+            if v_paid.get():
+                hint.append("Dein Video wird als „Bezahlte Partnerschaft“ gekennzeichnet.")
+            elif v_own.get():
+                hint.append("Dein Video wird als „Werbeinhalt“ gekennzeichnet.")
+            v_hint.set(" ".join(hint))
+            v_consent.set("Mit dem Posten stimmst du TikToks " + (
+                "Branded Content Policy und Music Usage Confirmation" if v_paid.get()
+                else "Music Usage Confirmation") + " zu.")
+            ready = bool(info) and bool(v_priv.get()) and not (brand and not (v_own.get() or v_paid.get()))
+            b_post.configure(state="normal" if ready else "disabled")
+        cb_priv.bind("<<ComboboxSelected>>", lambda e: upd())
+
+        def load():
+            try:
+                info = uploader.tt_creator_info(conf)
+            except Exception as e:
+                self.ui(lambda: v_who.set(f"❌ TikTok-Konto nicht abrufbar: {str(e)[:120]}"))
+                return
+            prev_png = None
+            try:
+                prev_png = core.make_preview(path, os.path.splitext(path)[0] + "_preview.png",
+                                             core.Runner(lambda *_: None), height=160)
+            except Exception:
+                pass
+            dur = None
+            try:
+                out = []
+                core.Runner(lambda *_: None).run([core.tool("ffprobe"), "-v", "error", "-show_entries",
+                                                  "format=duration", "-of", "csv=p=0", path], on_line=out.append)
+                dur = float(out[0])
+            except Exception:
+                pass
+
+            def show():
+                state["info"] = info
+                who = info.get("creator_nickname") or info.get("creator_username") or "?"
+                v_who.set(f"Posten auf: {who} (@{info.get('creator_username', '')})")
+                if prev_png:
+                    try:
+                        state["img"] = tk.PhotoImage(file=prev_png)
+                        prev_lbl.configure(image=state["img"], text="")
+                    except Exception:
+                        prev_lbl.configure(text="(Vorschau nicht verfügbar)")
+                for flag, chk, var in (("comment_disabled", c_com, v_com), ("duet_disabled", c_duet, v_duet),
+                                       ("stitch_disabled", c_stitch, v_stitch)):
+                    if info.get(flag):
+                        var.set(False)
+                        chk.configure(state="disabled")
+                maxd = info.get("max_video_post_duration_sec")
+                if dur and maxd and dur > maxd:
+                    v_status.set(f"⚠ Der Clip ist {dur:.0f} s lang – TikTok erlaubt dir max. {maxd} s.")
+                upd()
+            self.ui(show)
+        threading.Thread(target=load, daemon=True).start()
+
+        def send(direct):
+            caption = txt.get("1.0", "end").strip()
+            post = None
+            if direct:
+                names = {v: k for k, v in self.TT_PRIVACY.items()}
+                post = {"privacy_level": names.get(v_priv.get(), v_priv.get()),
+                        "disable_comment": not v_com.get(), "disable_duet": not v_duet.get(),
+                        "disable_stitch": not v_stitch.get(),
+                        "brand_content_toggle": bool(v_paid.get()), "brand_organic_toggle": bool(v_own.get())}
+            b_post.configure(state="disabled")
+            b_draft.configure(state="disabled")
+            v_status.set("⬆ Lade hoch …")
+
+            def run():
+                try:
+                    pid, st = uploader.tt_upload(conf, path, caption, self.log, None, post=post)
+                    h.setdefault("uploaded", {})["tt"] = pid
+                    h["pending"] = False
+                    if st == "SEND_TO_USER_INBOX":
+                        msg = "✅ Als Entwurf in deiner TikTok-App – dort Text einfügen und posten."
+                        h["tt_caption"] = caption
+                        self.ui(lambda: (self.root.clipboard_clear(), self.root.clipboard_append(caption)))
+                    elif st == "PUBLISH_COMPLETE":
+                        msg = "✅ Gepostet! Es kann ein paar Minuten dauern, bis es auf deinem Profil erscheint."
+                    else:
+                        msg = "✅ Hochgeladen – TikTok verarbeitet das Video noch (kann ein paar Minuten dauern)."
+                    self.log("♪ TikTok: " + msg)
+                    self.ui(lambda: (v_status.set(msg), self._refresh_row(i), self.save_session()))
+                except Exception as e:
+                    self.ui(lambda e=e: (v_status.set(f"❌ {e}"), upd(), b_draft.configure(state="normal")))
+            threading.Thread(target=run, daemon=True).start()
+        b_post.configure(command=lambda: send(True))
+        b_draft.configure(command=lambda: send(False))
+
     def upload_selected(self):
         if not uploader:
             messagebox.showerror("Upload", "uploader.py fehlt – bitte 'Nach Updates suchen'.")

@@ -1,6 +1,6 @@
 {
-  "version": "4.3",
-  "notes": "Hashtags automatisch passend zum Clip (Cops, Explosion, Heist, #fyp)",
+  "version": "4.4",
+  "notes": "Neues Fenster „Auf TikTok posten“: direkt posten mit Text, Hashtags und Vorschau (nach TikToks Regeln)",
   "files": [
     "StreamClipper.pyw",
     "clipper_core.py",
