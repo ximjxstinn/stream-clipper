@@ -342,6 +342,24 @@ def analyze_audio_frame(pcm, hp_state):
     return db(full), db(acc / n), tone
 
 
+def sub_bass(pcm, st):
+    """Wie viel dB der Tiefbass (< ~150 Hz) unter dem Gesamtpegel liegt. Explosion ≈ 0–6, Stimme/Baby/Schrei ≈ 15+."""
+    if not st:
+        st.extend([0.0, 0.0])
+    a = 0.11  # Tiefpass 2. Ordnung (zwei 1-Pol-Stufen) ~150 Hz bei 8 kHz
+    y1, y2 = st
+    full = acc = 0.0
+    for x in pcm:
+        y1 += a * (x - y1)
+        y2 += a * (y1 - y2)
+        acc += y2 * y2
+        full += x * x
+    st[0], st[1] = y1, y2
+    if full <= 1e-12:
+        return 99.0
+    return 10 * math.log10(full / max(acc, 1e-12))
+
+
 def siren_score(tones):
     """tones: Liste (tonhöhe, anteil) der letzten ~3 s (10 pro Sekunde).
     Sirene = deutlicher Ton, der FLIESSEND hoch und runter gleitet (Musik springt in Stufen, Sprache ist kein Ton)."""
@@ -417,7 +435,7 @@ class AudioReader(threading.Thread):
                                                  for l in iter(self.proc.stderr.readline, b"")],
                                  daemon=True).start()
                 hp = [0.0, 0.0]
-                tr_state = []
+                tr_state, sub_state = [], []
                 voice_sec, sec_key = [], None
                 while not self.stop.is_set():
                     raw = self.proc.stdout.read(FRAME * 2)
@@ -435,6 +453,7 @@ class AudioReader(threading.Thread):
                     self.on_db(now, game_db, "game")
                     self.on_db(now, game_db - voice_db, "low")
                     self.on_db(now, count_transients(samples, tr_state), "hits")
+                    self.on_db(now, sub_bass(samples, sub_state), "sub")
                     self.on_tone(now, tf, tr)
                     k = int(now)
                     if sec_key is not None and k != sec_key and voice_sec:
@@ -574,12 +593,12 @@ def rate_clip(path, base_game=None, base_motion=None, min_shots=4):
     pcm = array.array("h", a[:len(a) // 2 * 2])
     if sys.byteorder == "big":
         pcm.byteswap()
-    hp, tr = [0.0, 0.0], []
-    blocks = []  # (spiel_db, bass_anteil, schüsse, (tonhöhe, anteil))
+    hp, tr, sb = [0.0, 0.0], [], []
+    blocks = []  # (spiel_db, bass_anteil, schüsse, (tonhöhe, anteil), tiefbass_abstand)
     for k in range(len(pcm) // FRAME):
         smp = [x / 32768.0 for x in pcm[k * FRAME:(k + 1) * FRAME]]
         g, vd, tone = analyze_audio_frame(smp, hp)
-        blocks.append((g, g - vd, count_transients(smp, tr), tone))
+        blocks.append((g, g - vd, count_transients(smp, tr), tone, sub_bass(smp, sb)))
     fsz = VW * VH * 3
     frames, prev = [], None
     for k in range(len(v) // fsz):
@@ -599,9 +618,11 @@ def rate_clip(path, base_game=None, base_motion=None, min_shots=4):
             best_shots = max(best_shots, n)
         boom = False
         for i, b in enumerate(blocks[:-5]):
-            if b[0] - norm >= 15 and b[1] >= 3.0:
+            if (b[0] - norm >= 15 and b[1] >= 3.0 and b[4] <= 6.0 and not (b[3][0] and b[3][1] >= 0.18)
+                    and (i < 4 or b[0] - min(x[0] for x in blocks[i - 4:i]) >= 10)):
                 tail = blocks[i + 1:i + 6]
-                if min(x[0] for x in tail) - norm >= 8 and sum(x[2] for x in blocks[i:i + 6]) <= 2:
+                if (min(x[0] for x in tail) - norm >= 8 and sum(x[2] for x in blocks[i:i + 6]) <= 2
+                        and sum(x[4] for x in tail) / 5 <= 9.0):
                     boom = True
                     break
         siren = 0.0
@@ -669,6 +690,7 @@ class Detector:
         self.tones = deque(maxlen=40)     # (t, tonhöhe, anteil) ~10x pro Sekunde
         self.low = deque(maxlen=60)       # (t, Bass-Anteil dB) – hoch = Knall/Explosion, niedrig = Sprache
         self.hits = deque(maxlen=60)      # (t, Einschläge im 0,1-s-Block) – Schüsse
+        self.sub = deque(maxlen=60)       # (t, Tiefbass-Abstand dB) – klein = echtes Wummern (Explosion)
         self.min_shots = 4
         self.norm_game = None      # normales Spiel-dB (für die Spannungs-Bewertung der fertigen Clips)
         self.norm_motion = None
@@ -717,6 +739,8 @@ class Detector:
                 self.low.append((t, v))
             elif kind == "hits":
                 self.hits.append((t, v))
+            elif kind == "sub":
+                self.sub.append((t, v))
             else:
                 (self.game if kind == "game" else self.db).append((t, v))
 
@@ -775,6 +799,8 @@ class Detector:
             with self.lock:
                 lows = {round(t, 1): v for t, v in self.low}
                 hitd = {round(t, 1): h for t, h in self.hits}
+                subd = {round(t, 1): x for t, x in self.sub}
+                toned = {round(t, 1): (r if f else 0.0) for t, f, r in self.tones}
             g_recent = [(t, v) for t, v in game if t >= now - 4]
             blocks = 0
             local = self._median([v for _, v in g_recent]) if g_recent else norm10
@@ -786,20 +812,36 @@ class Detector:
                     blocks += 1
             if blocks < 2:
                 shots = 0
-            # Explosion: ein sehr lauter Knall mit viel Bass, der danach noch grollt (≥0,5 s laut)
+            # Explosion (Auto, Gas, Granate …): PLÖTZLICHER sehr lauter Knall mit echtem Tiefbass, der danach grollt.
+            # Kein Ton/keine Tonhöhe (Baby, Schrei, Hupe, Musik haben eine) und der Bass muss wirklich tief sein.
             for idx, (t, v) in enumerate(g_recent):
-                if t > now - 0.6 or v - norm10 < 15 or lows.get(round(t, 1), 0.0) < 3.0:
+                kt = round(t, 1)
+                if t > now - 0.6 or v - norm10 < 15 or lows.get(kt, 0.0) < 3.0:
                     continue
+                if subd and subd.get(kt, 99.0) > 6.0:
+                    continue  # zu wenig Tiefbass → kein Wummern
+                if toned.get(kt, 0.0) >= 0.18:
+                    continue  # klarer Ton (Schreien/Weinen/Hupe) → keine Explosion
+                before = [x for _, x in g_recent[max(0, idx - 4):idx]]
+                if before and v - min(before) < 10:
+                    continue  # nicht plötzlich → eher lauter werdendes Geräusch
                 tail = [x for _, x in g_recent[idx + 1:idx + 6]]
+                tail_sub = [subd.get(round(tt, 1), 0.0) for tt, _ in g_recent[idx + 1:idx + 6]]
                 hits_near = sum(hitd.get(round(tt, 1), 0) for tt, _ in g_recent[idx:idx + 6])
-                if len(tail) >= 5 and min(tail) - norm10 >= 8 and hits_near <= 2:
+                if (len(tail) >= 5 and min(tail) - norm10 >= 8 and hits_near <= 2
+                        and (not subd or sum(tail_sub) / len(tail_sub) <= 9.0)):
                     explosion = max(explosion or 0.0, v - norm10)
             norm_g = self._median(list(per_sec.values()))
             last2 = [per_sec[k] for k in range(int(now) - 2, int(now)) if k in per_sec]
             if len(last2) >= 2 and norm_g > -70:
                 with self.lock:
                     lw = [v for t, v in self.low if t >= now - 2]
-                if lw and sum(lw) / len(lw) >= 2.0:
+                    sw = [v for t, v in self.sub if t >= now - 2]
+                    tw = [1 for t, f, r in self.tones if t >= now - 2 and f and r >= 0.18]
+                # Spiel lauter = Motoren, Crash, Action mit Tiefbass – kein Schreien/Weinen/Musik (die haben einen klaren Ton)
+                bassy = not sw or sum(sw) / len(sw) <= 12.0
+                tonal = len(tw) >= 10
+                if lw and sum(lw) / len(lw) >= 2.0 and bassy and not tonal:
                     action = min(last2) - norm_g
         # Sirene (Ton), Blaulicht + Action (Bild)
         siren = siren_score(tones) if len(tones) >= 20 else None

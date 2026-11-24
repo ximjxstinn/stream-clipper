@@ -1,6 +1,6 @@
 {
-  "version": "3.7",
-  "notes": "Spannungs-Check: nur spannende Clips behalten/hochladen, Upload komplett automatisch einstellbar",
+  "version": "3.7.1",
+  "notes": "Explosionen nur noch echte Knalle mit Tiefbass (kein Baby/Schreien/Hupen mehr)",
   "files": [
     "StreamClipper.pyw",
     "clipper_core.py",

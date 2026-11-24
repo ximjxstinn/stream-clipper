@@ -14,6 +14,11 @@ SO GEHT'S
   4. "Ausgewählte clippen" oder "Alle clippen"
   Oder einfach "Alles automatisch" = analysieren + alle Top-Clips schneiden.
 
+NEU IN 3.7.1 – EXPLOSIONEN NUR NOCH ECHT
+  - 💥 zählt nur noch ein plötzlicher, sehr lauter Knall mit echtem Tiefbass, der danach grollt
+    (Auto-Explosion, Gasflasche, Granate). Baby-Weinen, Schreie, Hupen und Musik lösen nicht mehr aus.
+  - „Spiel wird lauter“ braucht jetzt auch echten Bass (Motor, Crash) – laute Töne/Weinen zählen nicht.
+
 NEU IN 3.7 – NUR SPANNENDE CLIPS, ALLES AUTOMATISCH
   - 🎯 Spannungs-Check: Jeder fertige Clip wird angeschaut und angehört und bekommt 0–100 Punkte
     (Schüsse, Explosion, Sirene, Blaulicht, viel Bewegung, laute Action = Punkte;
