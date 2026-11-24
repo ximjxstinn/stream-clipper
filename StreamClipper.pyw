@@ -5,6 +5,7 @@ import json
 import os
 import queue
 import threading
+import time
 import traceback
 import webbrowser
 import tkinter as tk
@@ -33,7 +34,7 @@ except ImportError:  # ältere Updater kennen live_clipper.py noch nicht → sel
     except Exception:
         live_clipper = None
 
-VERSION = "4.4"
+VERSION = "4.5"
 
 # Fertige Live-Profile für GTA 6 (jederzeit umschaltbar, gilt sofort – auch mitten im Stream)
 _ALL = ("cops", "siren", "shots", "explosion", "bluelight", "vision", "game", "voice", "chat", "clipreq")
@@ -104,7 +105,7 @@ DEFAULTS = {
     "w_chat": 65, "audio": True, "fmt": FORMATS[2], "vstyle": "Blur-Hintergrund", "quality": "1080p",
     "bestof": False, "nomenu": True, "vis": True, "mode": "Maximal (alles Spannende)", "live_times": [], "keywords": core.DEFAULT_KEYWORDS,
     "outdir": os.path.join(os.path.expanduser("~"), "Videos", "Stream Clips"),
-    "auto": False, "seen": [], "autostart": False, "autoupdate": True, "last_session": "", "tray": True, "tray_hint_shown": False, "live_popup": True, "live_voice": 12, "live_trig": {}, "live_game": 6, "live_vis": 1.6, "live_gap": 60, "live_hour": 30, "live_shots": 4, "live_chase": 3, "rp": False, "obs_port": 4455, "obs_pw": "", "rp_post": 8, "live_rate": True, "live_rate_min": 35, "live_drop": "keep", "live_auto": "approve", "live_profile": "", "live_profiles": {}, "live": False, "live_sens": "Maximal (alles Spannende)", "live_len": 30, "live_max": 100, "win_zoomed": True, "win_geo": "",
+    "auto": False, "seen": [], "autostart": False, "autoupdate": True, "last_session": "", "tray": True, "tray_hint_shown": False, "live_popup": True, "live_voice": 12, "live_trig": {}, "live_game": 6, "live_vis": 1.6, "live_gap": 60, "live_hour": 30, "live_shots": 4, "live_chase": 3, "rp": False, "watch": False, "watch_dir": os.path.join(os.path.expanduser("~"), "Videos", "PS5 Aufnahmen"), "watch_since": 0, "watch_done": [], "obs_port": 4455, "obs_pw": "", "rp_post": 8, "live_rate": True, "live_rate_min": 35, "live_drop": "keep", "live_auto": "approve", "live_profile": "", "live_profiles": {}, "live": False, "live_sens": "Maximal (alles Spannende)", "live_len": 30, "live_max": 100, "win_zoomed": True, "win_geo": "",
 }
 
 
@@ -207,6 +208,8 @@ class App:
             self.root.after(4000, self._toggle_live)
         if self.s.get("rp"):
             self.root.after(5000, self._toggle_rp)
+        self._watch_sizes = {}
+        self.root.after(15000, self._watch_tick)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close_button)
         self.tray = None
         self.root.bind("<Unmap>", self._on_unmap)
@@ -475,6 +478,15 @@ class App:
         ttk.Checkbutton(left, text="🎮 Auch ohne Stream clippen (PS Remote Play + OBS)", variable=self.v_rp,
                         command=self._toggle_rp).grid(row=r, column=0, columnspan=2, sticky="w", pady=(4, 0))
         ttk.Button(left, text="OBS …", command=self.obs_settings).grid(row=r, column=2, sticky="e", pady=(4, 0))
+        r += 1
+        self.v_watch = tk.BooleanVar(value=s.get("watch", False))
+        ttk.Checkbutton(left, text="📂 Neue PS5-Aufnahmen im Ordner automatisch clippen", variable=self.v_watch,
+                        command=self._toggle_watch).grid(row=r, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        ttk.Button(left, text="Ordner …", command=self._pick_watch_dir).grid(row=r, column=2, sticky="e", pady=(4, 0))
+        r += 1
+        self.v_watch_dir = tk.StringVar(value=s.get("watch_dir", DEFAULTS["watch_dir"]))
+        ttk.Label(left, textvariable=self.v_watch_dir, style="Muted.TLabel", wraplength=380).grid(
+            row=r, column=0, columnspan=3, sticky="w")
         r += 1
         self.v_rp_state = tk.StringVar(value="aus")
         ttk.Label(left, textvariable=self.v_rp_state, style="Muted.TLabel").grid(row=r, column=0, columnspan=3,
@@ -1034,6 +1046,103 @@ class App:
         ttk.Button(bf, text="🗑 Eigenes Profil löschen", command=delete_prof).pack(side="left")
         ttk.Button(bf, text="⭐ Als Profil speichern …", command=save_as).pack(side="left", padx=6)
         ttk.Button(bf, text="Speichern (gilt sofort)", style="Accent.TButton", command=save).pack(side="right")
+
+    # ------------------------------------------- 📂 Ordner beobachten (PS5-Aufnahmen per USB/PS App) --
+    def _pick_watch_dir(self):
+        d = filedialog.askdirectory(title="Ordner für PS5-Aufnahmen", initialdir=self.s.get("watch_dir") or "")
+        if d:
+            self.s["watch_dir"] = os.path.normpath(d)
+            self.v_watch_dir.set(self.s["watch_dir"])
+            self.save()
+
+    def _toggle_watch(self):
+        on = bool(self.v_watch.get())
+        self.s["watch"] = on
+        if on:
+            d = self.s.get("watch_dir") or DEFAULTS["watch_dir"]
+            os.makedirs(d, exist_ok=True)
+            self.s["watch_since"] = time.time()  # nur NEUE Dateien, nicht alles, was schon drin liegt
+            self.log(f"📂 Ordner wird beobachtet: {d}\n   Neue Videos dort werden automatisch analysiert, die besten "
+                     "Stellen geschnitten (und je nach Upload-Einstellung hochgeladen).")
+        else:
+            self.log("📂 Ordner-Beobachtung aus.")
+        self.save()
+
+    def _watch_scan(self):
+        d = self.s.get("watch_dir")
+        if not d or not os.path.isdir(d):
+            return []
+        since = float(self.s.get("watch_since") or 0)
+        done = set(self.s.get("watch_done") or [])
+        out = []
+        base_depth = d.rstrip("\\/").count(os.sep)
+        for root, dirs, files in os.walk(d):
+            if root.count(os.sep) - base_depth >= 5:  # PS5-USB-Ordner: PS5/CREATE/Video Clips/<Spiel>/…
+                dirs[:] = []
+            for fn in files:
+                if not fn.lower().endswith(VIDEO_EXTS) or fn.lower().endswith(("_tiktok.mp4", "_best-of.mp4")):
+                    continue
+                path = os.path.join(root, fn)
+                outdir = os.path.normcase(os.path.abspath(self.s.get("outdir") or DEFAULTS["outdir"]))
+                if os.path.normcase(os.path.abspath(path)).startswith(outdir + os.sep):
+                    continue  # eigene fertige Clips nie wieder einlesen
+                try:
+                    stt = os.stat(path)
+                except OSError:
+                    continue
+                key = f"{path}|{stt.st_size}"
+                # Kopierte Dateien behalten ihr altes Änderungsdatum → Erstellungszeit (Kopierzeit) zählt mit
+                if key in done or max(stt.st_ctime, stt.st_mtime) < since:
+                    continue
+                out.append((path, stt.st_size, key, max(stt.st_ctime, stt.st_mtime)))
+        return sorted(out, key=lambda x: x[3])
+
+    def _watch_tick(self):
+        self.root.after(30000, self._watch_tick)
+        if not self.s.get("watch") or self.busy:
+            return
+        try:
+            new = self._watch_scan()
+        except Exception as e:
+            self.log(f"⚠ Ordner-Beobachtung: {e}")
+            return
+        for path, size, key, _ in new:
+            # erst nehmen, wenn die Datei fertig kopiert ist (Größe 30 s lang gleich)
+            if self._watch_sizes.get(path) != size:
+                self._watch_sizes[path] = size
+                continue
+            self.s.setdefault("watch_done", []).append(key)
+            self.s["watch_done"] = self.s["watch_done"][-500:]
+            self.save()
+            self._watch_sizes.pop(path, None)
+            self.log(f"📂 Neue Aufnahme gefunden: {os.path.basename(path)} – mache automatisch die besten Clips …")
+            self.notify("📂 Neue PS5-Aufnahme", f"{os.path.basename(path)} wird automatisch geclippt.")
+            self.save_session()
+            self.v_file.set(path)
+            self.src_kind.set("file")
+            src = {"kind": "file", "path": path, "title": os.path.splitext(os.path.basename(path))[0]}
+            st = self.settings()
+            self._work(self._watch_job, src, st)
+            return  # eine Datei nach der anderen
+
+    def _watch_job(self, src, st):
+        core.ensure_tools(self.log, self.runner)
+        dur = 0.0
+        try:
+            out = []
+            self.runner.run([core.tool("ffprobe"), "-v", "error", "-show_entries", "format=duration", "-of",
+                             "csv=p=0", src["path"]], on_line=out.append)
+            dur = float(out[0])
+        except Exception:
+            pass
+        if 0 < dur <= 200:
+            # Kurzer Clip (z. B. aus der PlayStation App): ganz nehmen, Spannungs-Check entscheidet
+            hl = [{"time": dur / 2, "start": 0.0, "end": dur, "score": 100, "reason": "📂 kurze PS5-Aufnahme (ganz)",
+                   "chat": [], "features": [0, 0, 0, 0]}]
+            self.ui(lambda: self._show(src, hl, []))
+            self._clip_job(src, list(enumerate(hl)), st, best_only=True)
+        else:
+            self._full_auto_job(src, st)
 
     def _toggle_rp(self):
         on = bool(self.v_rp.get())

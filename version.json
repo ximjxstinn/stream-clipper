@@ -1,6 +1,6 @@
 {
-  "version": "4.4",
-  "notes": "Neues Fenster „Auf TikTok posten“: direkt posten mit Text, Hashtags und Vorschau (nach TikToks Regeln)",
+  "version": "4.5",
+  "notes": "Ordner beobachten: neue PS5-Aufnahmen werden automatisch geclippt",
   "files": [
     "StreamClipper.pyw",
     "clipper_core.py",
