@@ -32,9 +32,10 @@ IS_WIN = os.name == "nt"
 
 MAXIMAL = "Maximal (alles Spannende)"
 TRIGGERS = {  # Schlüssel: Anzeigename
+    "cops": "🚔 Cops hinter dir (Minimap blinkt rot/blau)",
     "siren": "🚨 Sirene / Alarm / Polizei (Ton)",
     "shots": "🔫 Schüsse (mehrere Schüsse / Dauerfeuer)",
-    "explosion": "💥 Explosionen (lauter Bass-Knall)",
+    "explosion": "💥 Explosionen (Feuerball im Bild + Knall)",
     "bluelight": "🚨 Blaulicht im Bild",
     "vision": "🎬 Action im Bild (viel Bewegung)",
     "game": "🎮 Spiel wird deutlich lauter",
@@ -509,6 +510,24 @@ def analyze_video_frame(rgb, prev_gray):
     return motion, red / n, blue / n, gray
 
 
+def scene_frame(rgb):
+    """Minimap-Farben (Cops) + Bild-Look (Explosion) aus einem VWxVH-Bild."""
+    x0, x1 = int(core.MM_BOX[0] * VW), int(core.MM_BOX[1] * VW)
+    y0, y1 = int(core.MM_BOX[2] * VH), int(core.MM_BOX[3] * VH)
+    mm = []
+    for y in range(y0, y1):
+        for x in range(x0, x1):
+            i = 3 * (y * VW + x)
+            mm.append((rgb[i], rgb[i + 1], rgb[i + 2]))
+    small = []
+    for y in range(2, VH, 8):
+        for x in range(4, VW, 8):
+            i = 3 * (y * VW + x)
+            small.append((rgb[i], rgb[i + 1], rgb[i + 2]))
+    red, blue = core.minimap_colors(mm)
+    return red, blue, core.frame_look(small)
+
+
 def bluelight_score(frames):
     """frames: Liste (rot, blau) der letzten ~3 s (2 pro Sekunde). Blaulicht = rot UND blau, die sich abwechseln."""
     if len(frames) < 4:
@@ -532,6 +551,7 @@ class VideoReader(threading.Thread):
     def __init__(self, channel, on_frame, stop, log, source=None):
         super().__init__(daemon=True)
         self.channel, self.on_frame, self.stop, self.log = channel.lower(), on_frame, stop, log
+        self.on_scene = lambda *a: None
         self.source = source
         self.proc = None
 
@@ -555,7 +575,12 @@ class VideoReader(threading.Thread):
                         self.log("   🎥 Live-Bild verbunden – erkenne Action und Blaulicht")
                         first = False
                     motion, red, blue, prev = analyze_video_frame(raw, prev)
-                    self.on_frame(time.time(), motion, red, blue)
+                    now_t = time.time()
+                    self.on_frame(now_t, motion, red, blue)
+                    try:
+                        self.on_scene(now_t, *scene_frame(raw))
+                    except Exception:
+                        pass
                 self.kill()
                 if self.source:
                     return
@@ -600,11 +625,24 @@ def rate_clip(path, base_game=None, base_motion=None, min_shots=4):
         g, vd, tone = analyze_audio_frame(smp, hp)
         blocks.append((g, g - vd, count_transients(smp, tr), tone, sub_bass(smp, sb)))
     fsz = VW * VH * 3
-    frames, prev = [], None
+    frames, prev, scn = [], None, []
     for k in range(len(v) // fsz):
-        m, rd, bl, prev = analyze_video_frame(v[k * fsz:(k + 1) * fsz], prev)
+        raw = v[k * fsz:(k + 1) * fsz]
+        m, rd, bl, prev = analyze_video_frame(raw, prev)
+        scn.append(scene_frame(raw))
         if k:
             frames.append((m, rd, bl))
+    # Cops (Minimap blinkt) + Explosion (Feuerball + Knall) – die wichtigsten GTA-Momente
+    cops_secs = sum(1 for st in range(0, max(0, len(scn) - 15), 4)
+                    if core.police_score([(r, b) for r, b, _ in scn[st:st + 16]]))
+    lowdb = [b[0] - b[4] for b in blocks]
+    boom_video = False
+    for st in range(0, max(0, len(scn) - 7), 2):
+        if core.flash_score([lk for _, _, lk in scn[st:st + 8]]):
+            sec = (st + 6) / 4.0
+            if core.boom_near(lowdb, sec):
+                boom_video = True
+                break
     score, why = 0.0, []
     if blocks:
         gs = [b[0] for b in blocks]
@@ -631,10 +669,13 @@ def rate_clip(path, base_game=None, base_motion=None, min_shots=4):
             siren = max(siren, siren_score([b[3] for b in blocks[st:st + 30]]))
         loud = sum(1 for b in blocks if b[0] - norm >= 6 and b[1] >= 2.0) / len(blocks)  # laut UND Spiel, nicht Stimme
         talk = sum(1 for b in blocks if b[1] < 1.5 and b[0] > norm - 3) / len(blocks)
-        if boom:
-            score += 30
+        if boom_video:
+            score += 35
             why.append("💥 Explosion")
-        if best_shots >= min_shots and not boom:
+        if cops_secs:
+            score += 25 + min(15, cops_secs * 2)
+            why.append("🚔 Cops")
+        if best_shots >= min_shots and not boom_video:
             score += min(35, 10 + best_shots * 2)
             why.append(f"🔫 {best_shots} Schüsse")
         if siren >= 1.2:
@@ -652,10 +693,10 @@ def rate_clip(path, base_game=None, base_motion=None, min_shots=4):
         if base and base > 0.3:
             ratio = mean_m / base
             if ratio >= 1.2:
-                score += min(25, (ratio - 1.0) * 25)
+                score += min(12, (ratio - 1.0) * 12)
                 why.append(f"🎬 Bewegung ×{ratio:.1f}")
         elif mean_m >= 4:
-            score += min(20, mean_m * 1.5)
+            score += min(10, mean_m * 0.8)
             why.append("🎬 viel Bewegung")
         blue = 0.0
         for st in range(0, max(1, len(frames) - 11), 4):
@@ -692,6 +733,11 @@ class Detector:
         self.low = deque(maxlen=60)       # (t, Bass-Anteil dB) – hoch = Knall/Explosion, niedrig = Sprache
         self.hits = deque(maxlen=60)      # (t, Einschläge im 0,1-s-Block) – Schüsse
         self.sub = deque(maxlen=60)       # (t, Tiefbass-Abstand dB) – klein = echtes Wummern (Explosion)
+        self.lowdb = deque(maxlen=60)     # (t, Tiefbass-Pegel dB) – für Knall-Erkennung
+        self.scenes = deque(maxlen=24)    # (t, minimap_rot, minimap_blau, look) ~4x pro Sekunde
+        self.police_seen = 0.0            # wann zuletzt Cops (Minimap blinkt)
+        self.chase_clips = 0
+        self.max_chase = 3                # höchstens so viele Clips pro Verfolgung
         self.min_shots = 4
         self.norm_game = None      # normales Spiel-dB (für die Spannungs-Bewertung der fertigen Clips)
         self.norm_motion = None
@@ -730,6 +776,10 @@ class Detector:
                 f, r = None, 0.0
             self.tones.append((t, f, r))
 
+    def add_scene(self, t, red, blue, look):
+        with self.lock:
+            self.scenes.append((t, red, blue, look))
+
     def add_frame(self, t, motion, red, blue):
         with self.lock:
             self.frames.append((t, motion, red, blue))
@@ -742,6 +792,8 @@ class Detector:
                 self.hits.append((t, v))
             elif kind == "sub":
                 self.sub.append((t, v))
+                if self.game:
+                    self.lowdb.append((t, self.game[-1][1] - v))
             else:
                 (self.game if kind == "game" else self.db).append((t, v))
 
@@ -816,25 +868,7 @@ class Detector:
                     blocks += 1
             if blocks < 2:
                 shots = 0
-            # Explosion (Auto, Gas, Granate …): PLÖTZLICHER sehr lauter Knall mit echtem Tiefbass, der danach grollt.
-            # Kein Ton/keine Tonhöhe (Baby, Schrei, Hupe, Musik haben eine) und der Bass muss wirklich tief sein.
-            for idx, (t, v) in enumerate(g_recent):
-                kt = round(t, 1)
-                if t > now - 0.6 or v - norm10 < 15 or lows.get(kt, 0.0) < 3.0:
-                    continue
-                if subd and subd.get(kt, 99.0) > 6.0:
-                    continue  # zu wenig Tiefbass → kein Wummern
-                if toned.get(kt, 0.0) >= 0.18:
-                    continue  # klarer Ton (Schreien/Weinen/Hupe) → keine Explosion
-                before = [x for _, x in g_recent[max(0, idx - 4):idx]]
-                if before and v - min(before) < 10:
-                    continue  # nicht plötzlich → eher lauter werdendes Geräusch
-                tail = [x for _, x in g_recent[idx + 1:idx + 6]]
-                tail_sub = [subd.get(round(tt, 1), 0.0) for tt, _ in g_recent[idx + 1:idx + 6]]
-                hits_near = sum(hitd.get(round(tt, 1), 0) for tt, _ in g_recent[idx:idx + 6])
-                if (len(tail) >= 5 and min(tail) - norm10 >= 8 and hits_near <= 2
-                        and (not subd or sum(tail_sub) / len(tail_sub) <= 9.0)):
-                    explosion = max(explosion or 0.0, v - norm10)
+            # (Explosion wird jetzt über Bild + Knall erkannt, siehe unten)
             norm_g = self._median(list(per_sec.values()))
             last2 = [per_sec[k] for k in range(int(now) - 2, int(now)) if k in per_sec]
             if len(last2) >= 2 and norm_g > -70:
@@ -858,8 +892,33 @@ class Detector:
             last_m = [m for t, m, _, _ in frames if t >= now - 2]
             if last_m and base_m > 0.3:
                 vis = (sum(last_m) / len(last_m)) / base_m
+        # GTA-Szenen: Cops (Minimap blinkt rot/blau) + Explosion (Feuerball im Bild UND Bass-Knall)
+        with self.lock:
+            sc = [x for x in self.scenes if x[0] >= now - 4]
+            lowdb = list(self.lowdb)
+        police = core.police_score([(r, b) for _, r, b, _ in sc]) if len(sc) >= 8 else 0.0
+        if police:
+            if now - self.police_seen > 40:
+                self.chase_clips = 0  # neue Verfolgung
+            self.police_seen = now
+        flash = core.flash_score([lk for t, _, _, lk in sc if t >= now - 2.5]) if sc else 0.0
+        if flash:
+            pre = sorted(v for t, v in lowdb if now - 5 <= t < now - 2)
+            post = [v for t, v in lowdb if t >= now - 2]
+            boom_ok = (not lowdb) or (pre and post and max(post) - pre[len(pre) // 2] >= 20 and max(post) >= -42)
+            if boom_ok:
+                explosion = flash
+        cops_ctx = now - self.police_seen < 10
+        # Schüsse nur mit Action drumherum (Cops, Bewegung, Explosion) – Schüsse im Hintergrund zählen nicht
+        if shots and not (cops_ctx or (vis or 0) >= 1.3 or flash):
+            shots = 0
+        # Sirene nur, wenn wirklich was los ist (Cops/Blaulicht/Bewegung) – nicht eine Sirene irgendwo in der Stadt
+        if siren and not (cops_ctx or (blue or 0) >= 1.0 or (vis or 0) >= 1.6):
+            siren = None
         # Messwerte fürs Log (Maximum pro Minute)
         pk = self.peak
+        if police:
+            pk["cops"] = (pk.get("cops") or 0) + 1
         pk["shots"] = max(pk.get("shots") or 0, shots)
         if explosion is not None:
             pk["boom"] = max(pk.get("boom") or 0.0, explosion)
@@ -892,6 +951,8 @@ class Detector:
             shots = 0
         if not en.get("explosion", True):
             explosion = None
+        if not en.get("cops", True):
+            police = 0.0
         if not en.get("siren", True):
             siren = None
         if not en.get("bluelight", True):
@@ -922,10 +983,13 @@ class Detector:
         if warm and shots >= self.min_shots:
             kind = kind or "shots"
             reasons.insert(0, f"🔫 Schüsse ({shots}× in 4 s)")
-        if warm and explosion is not None:
+        if explosion is not None:
             kind = kind or "explosion"
-            reasons.insert(0, f"💥 Explosion (+{explosion:.0f} dB)")
-        if blue is not None and blue >= 1.0:
+            reasons.insert(0, "💥 Explosion")
+        if police and self.chase_clips < self.max_chase:
+            kind = kind or "cops"
+            reasons.insert(0, "🚔 Cops hinter dir" + (" – Verfolgung läuft" if self.chase_clips else ""))
+        if warm and blue is not None and blue >= 1.0 and (vis or 0) >= 0.8:  # kein Menü/Karte (die ist rot/blau)
             kind = kind or "bluelight"
             reasons.insert(0, "🚨 Blaulicht im Bild")
         if warm and vis is not None and vis >= self.t_vis:
@@ -935,6 +999,8 @@ class Detector:
             return None
         self.last_clip = now
         self.clip_times.append(now)
+        if police:
+            self.chase_clips += 1
         with self.lock:
             self.clipreq.clear()
         sample = core._top_messages([m[2] for m in recent])
@@ -1016,7 +1082,9 @@ class LiveClipper:
         ar = AudioReader(channel, det.add_db, self.stream_stop, self.log)
         ar.on_tone = det.add_tone
         ar.start()
-        VideoReader(channel, det.add_frame, self.stream_stop, self.log).start()
+        vr = VideoReader(channel, det.add_frame, self.stream_stop, self.log)
+        vr.on_scene = det.add_scene
+        vr.start()
         self.log("   💬 lese Chat mit · 🎧 verbinde Live-Ton · 🎥 verbinde Live-Bild …")
         threading.Thread(target=self._detect, args=(det, uid), daemon=True).start()
 
@@ -1048,6 +1116,7 @@ class LiveClipper:
             det.cooldown = max(20, int(self.st.get("live_gap", det.cooldown)))
             det.max_per_hour = max(1, int(self.st.get("live_hour", 999)))
             det.min_shots = max(2, int(self.st.get("live_shots", 4)))
+            det.max_chase = max(1, int(self.st.get("live_chase", 3)))
             # „Modus“ + „Szenen-Erkennung im Bild“ aus dem Hauptfenster gelten auch live
             sens = SENSITIVITY.get(self.st.get("live_sens", "Mittel"), SENSITIVITY["Mittel"])
             det.t_chat, det.min_people = sens[0], sens[3]
@@ -1063,7 +1132,8 @@ class LiveClipper:
                          f"(ab {'aus' if det.t_voice >= 999 else '+' + format(det.t_voice, '.0f')}) · Spiel {fmt(pk['action'], 'dB')} (ab +{det.t_action:.0f}) · "
                          f"Sirene {f2(pk.get('siren'))} (ab 1) · Blaulicht {f2(pk.get('blue'))} (ab 1) · "
                          f"Bild ×{f2(pk.get('vis'))} (ab ×{det.t_vis}) · Schüsse {pk.get('shots') or 0} (ab {det.min_shots})"
-                         + (" · 💥 Explosion" if pk.get("boom") else ""))
+                         + (" · 💥 Explosion" if pk.get("boom") else "")
+                         + (f" · 🚔 Cops {pk['cops']} s" if pk.get("cops") else ""))
                 det.peak = {"u": 0, "kw": 0, "voice": None, "action": None, "siren": None, "blue": None,
                             "vis": None}
             if not trig:

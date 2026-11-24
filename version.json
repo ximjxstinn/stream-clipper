@@ -1,6 +1,6 @@
 {
-  "version": "3.9",
-  "notes": "Nur die besten Clips bei Alle clippen/Alles automatisch, Modus + Szenen-Erkennung auch live, Schüsse nur bei echten Waffensounds",
+  "version": "4.0",
+  "notes": "An echtem GTA-6-Stream eingestellt: Cops-Erkennung (Minimap), echte Explosionen, Analysieren nimmt nur die besten Stellen",
   "files": [
     "StreamClipper.pyw",
     "clipper_core.py",

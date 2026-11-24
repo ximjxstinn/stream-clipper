@@ -431,6 +431,170 @@ def parse_rms_file(path):
 # --------------------------------------------------------------------------- #
 #  Szenen-Erkennung im Bild: wie viel passiert pro Sekunde?
 # --------------------------------------------------------------------------- #
+# --------------------------------------------------------------------------- #
+#  GTA-Szenen im Bild: Polizei (Minimap blinkt rot/blau) + Explosionen (heller, warmer Blitz)
+# --------------------------------------------------------------------------- #
+MM_BOX = (0.008, 0.172, 0.82, 0.96)  # Minimap unten links (x0, x1, y0, y1) als Anteil vom Bild
+
+
+def minimap_colors(pixels):
+    """pixels: Liste (r, g, b) aus der Minimap. Gibt (rot_anteil, blau_anteil) zurück."""
+    n = max(1, len(pixels))
+    red = sum(1 for r, g, b in pixels if r > 90 and r - max(g, b) > 40)
+    blue = sum(1 for r, g, b in pixels if b > 110 and b - max(r, g) > 40)
+    return red / n, blue / n
+
+
+def police_score(mm):
+    """mm: Liste (rot, blau) der letzten ~4 s (4 pro Sekunde). 1 = Minimap blinkt rot/blau = Cops sind hinter dir."""
+    reds = [r > 0.35 for r, _ in mm]
+    blues = [b > 0.35 for _, b in mm]
+    nr, nb = sum(reds), sum(blues)
+    if nr < 2 or nb < 2:
+        return 0.0
+    state = ["r" if r else ("b" if b else "") for r, b in zip(reds, blues)]
+    seq = [x for x in state if x]
+    switches = sum(1 for a, b in zip(seq, seq[1:]) if a != b)
+    return 1.0 if switches >= 2 else 0.0
+
+
+def frame_look(pixels):
+    """pixels: (r, g, b) eines verkleinerten Bildes → (helligkeit, wärme, sättigung, weiß-anteil)."""
+    n = max(1, len(pixels))
+    r = sum(p[0] for p in pixels) / n
+    g = sum(p[1] for p in pixels) / n
+    b = sum(p[2] for p in pixels) / n
+    sat = sum(max(p) - min(p) for p in pixels) / n
+    white = sum(1 for p in pixels if min(p) > 200) / n
+    return (r * 77 + g * 150 + b * 29) / 256, r - b, sat, white
+
+
+def flash_score(looks):
+    """Explosion im Bild: in ≤0,75 s deutlich heller, ORANGE (warm + farbig) und nicht weiß überstrahlt.
+    looks: frame_look()-Werte der letzten ~2 s (4 pro Sekunde). Weiße Überblendungen (Figurwechsel,
+    Himmel, Ladebildschirm) zählen nicht."""
+    if len(looks) < 4:
+        return 0.0
+    peak = max(range(len(looks)), key=lambda k: looks[k][0])
+    before = [x[0] for x in looks[max(0, peak - 3):peak]]
+    if not before:
+        return 0.0
+    luma, warm, sat, white = looks[peak]
+    jump = luma - min(before)
+    if jump >= 45 and warm >= 25 and 110 <= luma <= 205 and sat >= 55 and white <= 0.28:
+        return min(3.0, jump / 45)
+    return 0.0
+
+
+def boom_near(low, sec, before=4):
+    """low: Tiefbass-Pegel (dB) alle 0,1 s. Gibt True, wenn um Sekunde `sec` ein lauter Bass-Knall ist."""
+    if not low:
+        return True  # ohne Ton nicht blockieren
+    k = int(sec * 10)
+    pre = low[max(0, k - before * 10):max(0, k - 10)]
+    post = low[max(0, k - 10):k + 20]
+    if not pre or not post:
+        return False
+    pre_s = sorted(pre)
+    return max(post) - pre_s[len(pre_s) // 2] >= 20 and max(post) >= -42
+
+
+def analyze_bass(media, workdir, runner):
+    """Tiefbass (<150 Hz) alle 0,1 s in dB – für Explosionen/Crashes."""
+    out = "low.txt"
+    runner.run([tool("ffmpeg"), "-hide_banner", "-nostats", "-loglevel", "error", "-i", media, "-vn", "-af",
+                "aresample=8000,lowpass=f=150,lowpass=f=150,asetnsamples=n=800:p=0,astats=metadata=1:reset=1,"
+                f"ametadata=print:key=lavfi.astats.Overall.RMS_level:file={out}", "-f", "null", "-"], cwd=workdir)
+    vals = []
+    try:
+        with open(os.path.join(workdir, out), encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if "RMS_level=" in line:
+                    v = line.split("=", 1)[1].strip()
+                    try:
+                        vals.append(max(-120.0, float(v)))
+                    except ValueError:
+                        vals.append(-120.0)
+    except OSError:
+        pass
+    return vals
+
+
+def analyze_scenes(src, workdir, runner, log, duration=None):
+    """Pro Sekunde: (polizei 0/1, explosion 0..3). Nutzt das Mini-Video der Bild-Analyse."""
+    cache = os.path.join(workdir, "scenes_v1.json")
+    if os.path.isfile(cache):
+        with open(cache) as f:
+            return json.load(f)
+    if src["kind"] == "vod":
+        media = next((os.path.join(workdir, f) for f in os.listdir(workdir) if f.startswith("lowres.")), None)
+        if not media:
+            return []
+        pre = []
+    else:
+        media, pre = src["path"], ["-hwaccel", "auto"]
+    log("🚔 Suche Polizei-Verfolgungen und Explosionen im Bild …")
+    W, H = 128, 72
+    x0, x1 = int(MM_BOX[0] * W), int(MM_BOX[1] * W)
+    y0, y1 = int(MM_BOX[2] * H), int(MM_BOX[3] * H)
+    mw, mh = x1 - x0, y1 - y0
+    vf = (f"fps=4,scale={W}:{H},split[a][b];[a]crop={mw}:{mh}:{x0}:{y0}[m];"
+          f"[b]scale=16:{mh}[f];[m][f]hstack")
+    kw = {"creationflags": 0x08000000} if IS_WIN else {}
+    proc = subprocess.Popen([tool("ffmpeg"), "-v", "error", *pre, "-i", media, "-an", "-filter_complex", vf,
+                             "-pix_fmt", "rgb24", "-f", "rawvideo", "-"], stdout=subprocess.PIPE,
+                            stdin=subprocess.DEVNULL, **kw)
+    fw = mw + 16
+    size = fw * mh * 3
+    frames = []
+    last = [-10]
+    try:
+        while True:
+            runner.check()
+            buf = proc.stdout.read(size)
+            if not buf or len(buf) < size:
+                break
+            mm, full = [], []
+            for y in range(mh):
+                row = buf[y * fw * 3:(y + 1) * fw * 3]
+                for x in range(fw):
+                    px = (row[3 * x], row[3 * x + 1], row[3 * x + 2])
+                    (mm if x < mw else full).append(px)
+            red, blue = minimap_colors(mm)
+            frames.append((red, blue, frame_look(full)))
+            if duration and len(frames) % 400 == 0:
+                pc = int(len(frames) / 4 / duration * 100)
+                if pc >= last[0] + 20:
+                    last[0] = pc
+                    log(f"   Szenen: {min(pc, 100)}%")
+    finally:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+    try:
+        low = analyze_bass(media, workdir, runner)
+    except Cancelled:
+        raise
+    except Exception:
+        low = []
+    out = []
+    for sec in range(len(frames) // 4):
+        win = frames[max(0, sec * 4 - 8):sec * 4 + 8]
+        pol = police_score([(f[0], f[1]) for f in win])
+        fw2 = frames[max(0, sec * 4 - 4):sec * 4 + 4]
+        boom = flash_score([f[2] for f in fw2])
+        if boom and not boom_near(low, sec):
+            boom = 0.0  # heller Blitz ohne Knall = Überblendung/Szenenwechsel, keine Explosion
+        out.append([pol, round(boom, 2)])
+    with open(cache, "w") as f:
+        json.dump(out, f)
+    secs_p = sum(1 for p, _ in out if p)
+    secs_b = sum(1 for _, b in out if b)
+    log(f"   🚔 {secs_p // 60} Min. Polizei-Action · 💥 {secs_b} Explosions-Blitze erkannt")
+    return out
+
+
 def analyze_motion(src, workdir, runner, log, duration=None):
     """Bewegung im Bild pro Sekunde (0 = Standbild, hoch = Action/Verfolgung/Kampf/Kameraschwenk)."""
     cache = os.path.join(workdir, "motion_v1.json")
@@ -596,7 +760,7 @@ def model_prob(w, f):
 
 def find_highlights(msgs=None, loudness=None, duration=None, *, count=10, pre=18, post=10,
                     min_gap=90, skip_start=120, w_chat=0.65, keywords=DEFAULT_KEYWORDS,
-                    raids=None, clip_reqs=None, max_len=60, log=None, motion=None, maximal=False):
+                    raids=None, clip_reqs=None, max_len=60, log=None, motion=None, maximal=False, scenes=None):
     """Gibt (highlights, kurve) zurück. kurve = Liste (zeit, score) für die Grafik."""
     log = log or (lambda *_: None)
     msgs = msgs or []
@@ -701,6 +865,24 @@ def find_highlights(msgs=None, loudness=None, duration=None, *, count=10, pre=18
         if not has_chat and not has_audio:
             wv = 1.0
         combined = [combined[i] + wv * vn[i] for i in range(nb)]
+    # --- GTA-Szenen: Polizei hinter dir (Minimap blinkt) + Explosionen = die wichtigsten Momente --------
+    pn = [0.0] * nb
+    bn = [0.0] * nb
+    if scenes and len(scenes) > 30:
+        for i in range(nb):
+            seg = scenes[i * BIN:(i + 1) * BIN]
+            if seg:
+                pn[i] = sum(1 for p_, _ in seg if p_) / len(seg)
+                bn[i] = max(b_ for _, b_ in seg)
+        bn = [max(bn[max(0, i - 1):i + 2]) for i in range(nb)]  # Explosion strahlt auf die Nachbar-Abschnitte
+        combined = [combined[i] + 1.4 * pn[i] + 0.9 * min(bn[i], 2.0) for i in range(nb)]
+        # Langes Gerede ohne Action (Stimme laut, aber Bild ruhig, keine Cops/Explosion) abwerten
+        if any(pn) or any(bn):
+            # Es gab echte GTA-Action → die hat Vorrang. Reden/Lachen ohne Cops/Explosion zählt viel weniger.
+            near_act = [max(pn[max(0, i - 6):i + 7] + bn[max(0, i - 6):i + 7]) for i in range(nb)]
+            for i in range(nb):
+                if near_act[i] == 0:
+                    combined[i] *= 0.3
     # "clip" / "!clip" im Chat (auch von dir) = jemand fand die Stelle gut genug zum Clippen
     clip_bins = [0] * nb
     for ct in clip_reqs:
@@ -772,7 +954,13 @@ def find_highlights(msgs=None, loudness=None, duration=None, *, count=10, pre=18
         chat_led = has_chat and wc * cn[i] > 0 and wc * cn[i] >= wa * an[i]
         # Den eigentlichen Moment finden: Chat reagiert 5-20 s später (Stream-Delay + Reaktionszeit)
         visual_led = vn[i] > 0.3 and vn[i] >= an[i] and not chat_led
-        if visual_led:
+        boom_secs = [(scenes[k][1], k) for k in range(max(0, i * BIN - BIN), min(len(scenes or []), i * BIN + 2 * BIN))
+                     if scenes[k][1] > 0] if scenes else []
+        if boom_secs:
+            moment = max(boom_secs)[1] + 3  # Explosion: Clip so legen, dass der Knall gut drin ist
+        elif pn[i] > 0.5 and not chat_led:
+            moment = t
+        elif visual_led:
             moment = t  # Bild-Action: der Moment ist da, wo das Bild am meisten los ist
         elif has_audio:
             lo_s = int(max(0, t - 25)) if chat_led else int(max(0, i * BIN - BIN))
@@ -807,6 +995,10 @@ def find_highlights(msgs=None, loudness=None, duration=None, *, count=10, pre=18
         near_v = max(vn[max(0, i - 1):i + 2]) if vn else 0.0
         if near_v > 0.6:
             reasons.append("🎬 viel Action im Bild")
+        if pn[i] > 0:
+            reasons.insert(0, "🚔 Cops hinter dir")
+        if bn[i] > 0:
+            reasons.insert(0, "💥 Explosion")
         if model and model_prob(model, feats[i]) > 0.65:
             reasons.append("👍 passt zu deinem Geschmack")
         sample = _top_messages([m[2] for m in msgs if start <= m[0] <= end + 15])

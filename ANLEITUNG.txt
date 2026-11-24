@@ -14,6 +14,19 @@ SO GEHT'S
   4. "Ausgewählte clippen" oder "Alle clippen"
   Oder einfach "Alles automatisch" = analysieren + alle Top-Clips schneiden.
 
+NEU IN 4.0 – AN DEINEM ECHTEN STREAM EINGESTELLT (Bank-Überfall)
+  - 🚔 NEU: Cops-Erkennung über die Minimap – blinkt sie rot/blau, sind die Cops hinter dir.
+    Funktioniert am PC und auf der PS5 (gleiches HUD). Höchstens X Clips pro Verfolgung (einstellbar).
+  - 💥 Explosionen nur noch, wenn im Bild ein ORANGER Feuerball UND gleichzeitig ein Bass-Knall ist.
+    Überblendungen (Figurwechsel, Himmel, Ladebildschirm), Baby, Schreie usw. zählen nicht mehr.
+  - 🔫 Schüsse und 🚨 Sirenen nur noch, wenn drumherum Action ist (Cops, Blaulicht, viel Bewegung) –
+    nicht mehr, wenn irgendwo im Hintergrund geballert wird.
+  - „Action im Bild“, „Spiel lauter“ und „Stimme“ sind in allen GTA-Profilen aus (haben zu viel Unsinn geclippt).
+  - 🔍 Analysieren: sucht jetzt Cops + Explosionen im Bild und nimmt nur die besten Stellen.
+    Reden/Lachen ohne Action zählt kaum noch. Modus steht auf „Normal (nur die besten)“.
+  - Spannungs-Check kennt jetzt auch Cops und Explosionen.
+  - Langweilige Clips werden nicht mehr gelöscht, nur nicht hochgeladen.
+
 NEU IN 3.9
   - 🏆 „Alle clippen“ und „Alles automatisch“ nehmen nur noch die BESTEN: nach Hype sortiert schneiden,
     jeden Clip auf Spannung prüfen, Langweiliges sofort aussortieren (löschen) – bis „Anzahl Clips“

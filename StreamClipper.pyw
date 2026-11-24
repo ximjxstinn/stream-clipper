@@ -33,10 +33,10 @@ except ImportError:  # ältere Updater kennen live_clipper.py noch nicht → sel
     except Exception:
         live_clipper = None
 
-VERSION = "3.9"
+VERSION = "4.0"
 
 # Fertige Live-Profile für GTA 6 (jederzeit umschaltbar, gilt sofort – auch mitten im Stream)
-_ALL = ("siren", "shots", "explosion", "bluelight", "vision", "game", "voice", "chat", "clipreq")
+_ALL = ("cops", "siren", "shots", "explosion", "bluelight", "vision", "game", "voice", "chat", "clipreq")
 
 
 def _trig(*on):
@@ -44,28 +44,30 @@ def _trig(*on):
 
 
 PROFILE_KEYS = ("live_trig", "live_game", "live_vis", "live_voice", "live_gap", "live_hour", "live_shots",
-                "live_rate", "live_rate_min", "live_len")
+                "live_rate", "live_rate_min", "live_len", "live_chase")
 GTA_PROFILES = {
+    # Abgestimmt auf einen echten GTA-6-Stream (Bank-Überfall + Verfolgung): Cops + Explosionen sind die
+    # zuverlässigsten Signale. Reden, „Spiel lauter“ und „nur Bewegung“ lösen nicht mehr allein aus.
     "🎮 GTA 6 – Standard (empfohlen)": {
-        "live_trig": _trig("siren", "shots", "explosion", "bluelight", "vision", "game", "voice", "clipreq"),
-        "live_game": 7, "live_vis": 1.8, "live_voice": 15, "live_gap": 60, "live_hour": 25, "live_shots": 4,
-        "live_rate": True, "live_rate_min": 35, "live_len": 30},
+        "live_trig": _trig("cops", "explosion", "shots", "siren", "bluelight", "clipreq"),
+        "live_game": 8, "live_vis": 1.8, "live_voice": 0, "live_gap": 60, "live_hour": 30, "live_shots": 4,
+        "live_rate": True, "live_rate_min": 35, "live_len": 30, "live_chase": 3},
     "🚔 GTA 6 – Polizei & Verfolgungsjagd": {
-        "live_trig": _trig("siren", "bluelight", "shots", "explosion", "vision", "game", "clipreq"),
-        "live_game": 6, "live_vis": 1.6, "live_voice": 0, "live_gap": 45, "live_hour": 40, "live_shots": 4,
-        "live_rate": True, "live_rate_min": 30, "live_len": 30},
+        "live_trig": _trig("cops", "siren", "bluelight", "explosion", "shots", "clipreq"),
+        "live_game": 8, "live_vis": 1.8, "live_voice": 0, "live_gap": 45, "live_hour": 40, "live_shots": 4,
+        "live_rate": True, "live_rate_min": 30, "live_len": 30, "live_chase": 5},
     "💰 GTA 6 – Überfall / Einbruch / Schießerei": {
-        "live_trig": _trig("shots", "explosion", "siren", "bluelight", "vision", "game", "voice", "clipreq"),
-        "live_game": 6, "live_vis": 1.6, "live_voice": 15, "live_gap": 40, "live_hour": 60, "live_shots": 3,
-        "live_rate": True, "live_rate_min": 30, "live_len": 30},
+        "live_trig": _trig("cops", "explosion", "shots", "siren", "bluelight", "clipreq"),
+        "live_game": 8, "live_vis": 1.8, "live_voice": 0, "live_gap": 40, "live_hour": 60, "live_shots": 3,
+        "live_rate": True, "live_rate_min": 30, "live_len": 30, "live_chase": 6},
     "🔥 GTA 6 – Nur die krassesten Momente": {
-        "live_trig": _trig("shots", "explosion", "siren", "bluelight", "clipreq"),
+        "live_trig": _trig("cops", "explosion", "clipreq"),
         "live_game": 10, "live_vis": 2.5, "live_voice": 0, "live_gap": 120, "live_hour": 10, "live_shots": 8,
-        "live_rate": True, "live_rate_min": 50, "live_len": 30},
+        "live_rate": True, "live_rate_min": 45, "live_len": 30, "live_chase": 1},
     "😎 GTA 6 – Chillen / Freeroam": {
-        "live_trig": _trig("explosion", "shots", "siren", "vision", "voice", "clipreq"),
-        "live_game": 10, "live_vis": 2.2, "live_voice": 18, "live_gap": 180, "live_hour": 8, "live_shots": 6,
-        "live_rate": True, "live_rate_min": 45, "live_len": 30},
+        "live_trig": _trig("cops", "explosion", "clipreq"),
+        "live_game": 10, "live_vis": 2.2, "live_voice": 0, "live_gap": 180, "live_hour": 8, "live_shots": 6,
+        "live_rate": True, "live_rate_min": 45, "live_len": 30, "live_chase": 1},
 }
 CUSTOM_PROFILE = "✏ Eigene Einstellungen"
 import sys
@@ -92,7 +94,7 @@ DEFAULTS = {
     "w_chat": 65, "audio": True, "fmt": FORMATS[2], "vstyle": "Blur-Hintergrund", "quality": "1080p",
     "bestof": False, "nomenu": True, "vis": True, "mode": "Maximal (alles Spannende)", "live_times": [], "keywords": core.DEFAULT_KEYWORDS,
     "outdir": os.path.join(os.path.expanduser("~"), "Videos", "Stream Clips"),
-    "auto": False, "seen": [], "autostart": False, "autoupdate": True, "last_session": "", "tray": True, "tray_hint_shown": False, "live_popup": True, "live_voice": 12, "live_trig": {}, "live_game": 6, "live_vis": 1.6, "live_gap": 60, "live_hour": 30, "live_shots": 4, "live_rate": True, "live_rate_min": 35, "live_drop": "keep", "live_auto": "approve", "live_profile": "", "live_profiles": {}, "live": False, "live_sens": "Maximal (alles Spannende)", "live_len": 30, "live_max": 100, "win_zoomed": True, "win_geo": "",
+    "auto": False, "seen": [], "autostart": False, "autoupdate": True, "last_session": "", "tray": True, "tray_hint_shown": False, "live_popup": True, "live_voice": 12, "live_trig": {}, "live_game": 6, "live_vis": 1.6, "live_gap": 60, "live_hour": 30, "live_shots": 4, "live_chase": 3, "live_rate": True, "live_rate_min": 35, "live_drop": "keep", "live_auto": "approve", "live_profile": "", "live_profiles": {}, "live": False, "live_sens": "Maximal (alles Spannende)", "live_len": 30, "live_max": 100, "win_zoomed": True, "win_geo": "",
 }
 
 
@@ -120,6 +122,13 @@ class App:
                 self.s["keywords"] = (self.s.get("keywords", "").rstrip(", ") + ", " + ", ".join(extra)).strip(", ")
             self.s["mig_31"] = True
             self.save()
+        if not self.s.get("mig_40"):
+            self.s["mig_40"] = True
+            self.s["mode"] = MODES[0]  # Analysieren = nur die besten Stellen
+            if self.s.get("live_drop") == "delete":
+                self.s["live_drop"] = "keep"  # nichts mehr endgültig löschen, nur nicht hochladen
+            self.root.after(1500, lambda: self.apply_live_profile("🎮 GTA 6 – Standard (empfohlen)"))
+            self.s["mig_38"] = True
         if not self.s.get("mig_38"):
             self.s["mig_38"] = True
             self.root.after(1500, lambda: self.apply_live_profile("🎮 GTA 6 – Standard (empfohlen)"))
@@ -851,6 +860,7 @@ class App:
             ("Bewegung im Bild ab (× normal, ×10)", "live_vis", 16, 12, 40, "16 = ×1,6 · 25 = ×2,5"),
             ("Stimme ab (+dB, 0 = aus)", "live_voice", 12, 0, 30, "12 = Rufen · 15 = Schreien"),
             ("Schüsse: mindestens so viele in 4 Sek.", "live_shots", 4, 2, 20, "Sturmgewehr-Salve = 8–10+"),
+            ("Clips pro Verfolgung (Cops)", "live_chase", 3, 1, 10, "1 = nur der Anfang der Jagd"),
             ("Mindestabstand zwischen Clips (Sek.)", "live_gap", 60, 20, 600, "größer = weniger Clips"),
             ("Höchstens Clips pro Stunde", "live_hour", 30, 1, 200, ""),
         ]
@@ -900,8 +910,8 @@ class App:
         r += 1
 
         def preset(level):
-            vals = {"wenig": (10, 25, 15, 180, 10, 8), "mittel": (6, 16, 12, 60, 30, 4),
-                    "viel": (4, 14, 8, 30, 80, 3)}[level]
+            vals = {"wenig": (10, 25, 0, 180, 10, 8), "mittel": (8, 18, 0, 60, 30, 4),
+                    "viel": (6, 16, 15, 40, 60, 3)}[level]
             for (key, v) in zip(("live_game", "live_vis", "live_voice", "live_gap", "live_hour", "live_shots"), vals):
                 ents[key].set(v)
         pf = ttk.Frame(f, style="Panel.TFrame")
@@ -917,7 +927,7 @@ class App:
                 return
             for k, var in vars_.items():
                 var.set(bool((prof.get("live_trig") or {}).get(k, True)))
-            for k in ("live_game", "live_voice", "live_gap", "live_hour", "live_shots", "live_rate_min"):
+            for k in ("live_game", "live_voice", "live_gap", "live_hour", "live_shots", "live_rate_min", "live_chase"):
                 if k in prof and k in ents:
                     ents[k].set(int(prof[k]))
             if "live_vis" in prof:
@@ -946,6 +956,7 @@ class App:
             self.s["live_gap"] = gi("live_gap", 60)
             self.s["live_hour"] = gi("live_hour", 30)
             self.s["live_shots"] = gi("live_shots", 4)
+            self.s["live_chase"] = gi("live_chase", 3)
             self.s["live_rate"] = bool(v_rate.get())
             self.s["live_rate_min"] = max(0, min(100, gi("live_rate_min", 35)))
             self.s["live_drop"] = next((k for k, t in drops.items() if t == v_drop.get()), "keep")
@@ -1384,6 +1395,14 @@ class App:
                 raise
             except Exception as e:
                 self.log(f"⚠ Szenen-Erkennung im Bild ging nicht ({str(e)[:100]}) – mache ohne weiter.")
+        scenes = []
+        if motion and st.get("vis", True):
+            try:
+                scenes = core.analyze_scenes(src, work, self.runner, self.log, length)
+            except core.Cancelled:
+                raise
+            except Exception as e:
+                self.log(f"⚠ Cops/Explosions-Erkennung ging nicht ({str(e)[:100]}) – mache ohne weiter.")
         if not msgs and not loud and not motion:
             raise RuntimeError("Keine Daten zum Analysieren (weder Chat noch Ton noch Bild).")
         maximal = st.get("mode", "").startswith("Maximal")
@@ -1398,7 +1417,8 @@ class App:
         hl, curve = core.find_highlights(
             msgs, loud, length, count=want * 3 if st.get("nomenu", True) else want, pre=st["pre"], post=st["post"],
             min_gap=gap, skip_start=st["skip_start"] * 60, w_chat=st["w_chat"] / 100, keywords=st["keywords"],
-            raids=info.get("raids"), clip_reqs=info.get("clips"), log=self.log, motion=motion, maximal=maximal)
+            raids=info.get("raids"), clip_reqs=info.get("clips"), log=self.log, motion=motion, maximal=maximal,
+            scenes=scenes)
         if maximal and src.get("kind") == "vod" and self.s.get("live_times"):
             # Szenen, die der Live-Clipper schon geclippt hat, nicht doppelt schneiden
             lt = self.s["live_times"]
@@ -1413,7 +1433,11 @@ class App:
             hl = self._filter_menus(src, hl, want, os.path.join(work, "bildcheck"))
         hl = hl[:want]
         if not hl:
-            raise RuntimeError("Keine auffälligen Stellen gefunden.")
+            if (length or 0) < 180:
+                raise RuntimeError("Das Video ist nur " + core.fmt_time(length or 0) + " lang – zu kurz zum Analysieren. "
+                                   "Nimm einen ganzen Stream (VOD) oder eine längere Aufnahme.")
+            raise RuntimeError("Keine auffälligen Stellen gefunden – in diesem Stream gab es keine Cops, "
+                               "Explosionen oder lauten Momente. Tipp: Modus auf „Maximal“ stellen.")
         self.log(f"✔ {len(hl)} Highlights gefunden – Doppelklick zum Ansehen, dann clippen.")
         self.ui(lambda: self._show(src, hl, curve))
         return src, hl
