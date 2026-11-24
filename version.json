@@ -1,6 +1,6 @@
 {
-  "version": "3.3.1",
-  "notes": "Fix: Live-Clipper hört den Ton jetzt immer mit (Action/Stimme)",
+  "version": "3.3.2",
+  "notes": "Live-Clipper empfindlicher + Messwerte im Log; Mausrad verstellt keine Felder mehr",
   "files": [
     "StreamClipper.pyw",
     "clipper_core.py",

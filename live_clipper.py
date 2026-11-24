@@ -31,9 +31,9 @@ IS_WIN = os.name == "nt"
 
 MAXIMAL = "Maximal (alles Spannende)"
 SENSITIVITY = {  # (Chat-Score, Stimme +dB, Spiel-Action +LU, min. Leute im Chat)
-    MAXIMAL: (1.5, 6.0, 6.0, 2),
-    "Hoch (mehr Clips)": (2.5, 8.0, 9.0, 3),
-    "Mittel": (4.0, 10.0, 12.0, 3),
+    MAXIMAL: (1.5, 5.0, 4.0, 2),
+    "Hoch (mehr Clips)": (2.5, 7.0, 7.0, 3),
+    "Mittel": (4.0, 9.0, 10.0, 3),
     "Niedrig (nur große Momente)": (6.0, 13.0, 99.0, 3),
 }
 
@@ -327,6 +327,7 @@ class Detector:
         self.db = deque(maxlen=400)       # (t, dB) pro Sekunde
         self.start = None
         self.last_clip = 0.0
+        self.peak = {"u": 0, "kw": 0, "voice": None, "action": None}
         self.lock = threading.Lock()
 
     def add_msg(self, t, user, text):
@@ -382,14 +383,23 @@ class Detector:
                 voice_diff = min(last2) - norm
         action = None
         if len(game) >= 600:  # ~1 Minute Spielton als Vergleich
-            per_sec = {}
+            acc = {}
             for t, v in game:
-                k = int(t)
-                per_sec[k] = max(per_sec.get(k, -90.0), v)
+                a = acc.setdefault(int(t), [0.0, 0])
+                a[0] += v
+                a[1] += 1
+            per_sec = {k: a[0] / a[1] for k, a in acc.items()}  # Mittelwert pro Sekunde
             norm_g = self._median(list(per_sec.values()))
-            last3 = [per_sec[k] for k in range(int(now) - 3, int(now)) if k in per_sec]
-            if len(last3) >= 3 and norm_g > -70:
-                action = min(last3) - norm_g
+            last2 = [per_sec[k] for k in range(int(now) - 2, int(now)) if k in per_sec]
+            if len(last2) >= 2 and norm_g > -70:
+                action = min(last2) - norm_g
+        # Messwerte fürs Log (Maximum pro Minute)
+        pk = self.peak
+        pk["u"], pk["kw"] = max(pk["u"], u15), max(pk["kw"], kw)
+        if voice_diff is not None:
+            pk["voice"] = voice_diff if pk["voice"] is None else max(pk["voice"], voice_diff)
+        if action is not None:
+            pk["action"] = action if pk["action"] is None else max(pk["action"], action)
         feats = [min(chat_score / 4.0, 3.0), min((kw / max(1, u15)) / 0.5, 2.0),
                  min(max(0.0, (voice_diff or 0) - 4.0) / 8.0, 3.0), min(u15 / max(1.0, mean) / 4.0, 2.0)]
         if now - self.last_clip < self.cooldown:
@@ -507,9 +517,18 @@ class LiveClipper:
     def _detect(self, det, uid):
         stop = self.stream_stop
         max_clips = int(self.st.get("live_max", 25))
+        next_report = time.time() + 60
         while stop and not stop.is_set():
             stop.wait(1)
             trig = det.tick(time.time())
+            if time.time() >= next_report:
+                next_report = time.time() + 60
+                pk = det.peak
+                fmt = lambda v, u: "—" if v is None else f"{v:+.0f} {u}"
+                self.log(f"   📊 letzte Minute: Chat max {pk['u']} Leute/{pk['kw']} Hype-Wörter · "
+                         f"Stimme max {fmt(pk['voice'], 'dB')} (Clip ab +{det.t_voice:.0f}) · "
+                         f"Spiel max {fmt(pk['action'], 'LU')} (Clip ab +{det.t_action:.0f})")
+                det.peak = {"u": 0, "kw": 0, "voice": None, "action": None}
             if not trig:
                 continue
             if self.count >= max_clips:

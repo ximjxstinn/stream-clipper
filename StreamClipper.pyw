@@ -33,7 +33,7 @@ except ImportError:  # ältere Updater kennen live_clipper.py noch nicht → sel
     except Exception:
         live_clipper = None
 
-VERSION = "3.3.1"
+VERSION = "3.3.2"
 import sys
 SETTINGS_FILE = os.path.join(core.APP_DIR, "settings.json")
 SESSION_DIR = os.path.join(core.APP_DIR, "gespeichert")
@@ -85,6 +85,12 @@ class App:
             if extra:
                 self.s["keywords"] = (self.s.get("keywords", "").rstrip(", ") + ", " + ", ".join(extra)).strip(", ")
             self.s["mig_31"] = True
+            self.save()
+        if not self.s.get("mig_332"):
+            self.s["vstyle"] = "Mitte zuschneiden"
+            if int(self.s.get("live_len", 30) or 0) < 20:
+                self.s["live_len"] = 30
+            self.s["mig_332"] = True
             self.save()
         if not self.s.get("mig_33"):
             # Einmalig: auch beim Analysieren alles Spannende + Szenen-Erkennung im Bild
@@ -208,12 +214,19 @@ class App:
                 return
             w = self.root.winfo_containing(e.x_root, e.y_root)
             while w is not None and w is not lcan:
-                if isinstance(w, (tk.Text, ttk.Combobox, ttk.Spinbox)):
-                    return  # diese Felder scrollen selbst
+                if isinstance(w, tk.Text):
+                    return  # Textfeld scrollt selbst
                 w = w.master
             if w is lcan:
                 lcan.yview_scroll(int(-e.delta / 120) or (-1 if e.delta > 0 else 1), "units")
         self.root.bind_all("<MouseWheel>", wheel, add="+")
+        # Mausrad soll NIE Werte in Auswahlfeldern/Zahlenfeldern verstellen (passierte beim Scrollen)
+        for cls in ("TCombobox", "TSpinbox", "Spinbox"):
+            for ev in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+                try:
+                    self.root.unbind_class(cls, ev)
+                except Exception:
+                    pass
         right = ttk.Frame(body)
         right.pack(side="left", fill="both", expand=True, padx=(12, 0))
 
