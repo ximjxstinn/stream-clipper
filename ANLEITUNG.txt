@@ -14,6 +14,13 @@ SO GEHT'S
   4. "Ausgewählte clippen" oder "Alle clippen"
   Oder einfach "Alles automatisch" = analysieren + alle Top-Clips schneiden.
 
+NEU IN 4.3 – HASHTAGS AUTOMATISCH
+  - Hashtags passend zum Clip: Cops → #gta6cops #verfolgungsjagd #polizei, Explosion → #explosion,
+    Schüsse → #schießerei #shootout, Remote Play → #ps5, Heist im Streamtitel → #heist #überfall,
+    dazu deine eigenen Hashtags, #ximjxstinn und #fyp #fürdich (max. ~10). Abschaltbar im Upload-Fenster.
+  - TikTok-Entwürfe: TikTok erlaubt dabei keinen Text → die App kopiert Text + Hashtags in die
+    Zwischenablage und legt „…_tiktok-text.txt“ neben den Clip.
+
 NEU IN 4.2 – 🎮 CLIPS OHNE STREAM (PS REMOTE PLAY + OBS)
   - Haken „🎮 Auch ohne Stream clippen (PS Remote Play + OBS)“: Sobald das PS-Remote-Play-Fenster offen ist
     (und du NICHT live bist), schaut die App das Fenster mit – Cops (Minimap), Explosionen, Blaulicht.

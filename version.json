@@ -1,6 +1,6 @@
 {
-  "version": "4.2",
-  "notes": "Clips ohne Stream: PS Remote Play mitschauen, OBS speichert die Clips",
+  "version": "4.3",
+  "notes": "Hashtags automatisch passend zum Clip (Cops, Explosion, Heist, #fyp)",
   "files": [
     "StreamClipper.pyw",
     "clipper_core.py",

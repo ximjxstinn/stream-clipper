@@ -26,7 +26,7 @@ DEFAULT_CONF = {
     "tt_client_key": "", "tt_client_secret": "", "tt_token": {}, "tt_mode": "draft", "tt_auto": False,
     "title": "{stream} – Highlight #{nr} 🔥",
     "description": "Live auf https://twitch.tv/ximjxstinn 🎮\nFolg mir für mehr Clips!",
-    "hashtags": "#fortnite #twitch #gaming #ximjxstinn #clips",
+    "hashtags": "#fortnite #twitch #gaming #ximjxstinn #clips", "auto_tags": True,
     "auto_max": 3, "approve": True,
 }
 
@@ -51,9 +51,55 @@ def save_conf(c):
     os.replace(CONF_FILE + ".tmp", CONF_FILE)
 
 
+# Passende Hashtags je nachdem, was im Clip passiert (aus dem Grund, warum geclippt wurde)
+AUTO_TAG_RULES = [
+    (("cops", "polizei", "sirene", "blaulicht"), "#gta6cops #verfolgungsjagd #polizei"),
+    (("explosion",), "#explosion #gta6explosion"),
+    (("schüsse", "schuss"), "#schießerei #shootout"),
+    (("remote play", "ps5"), "#ps5"),
+    (("stimme", "lach", "chat"), "#funny #lustig"),
+]
+TITLE_TAG_RULES = [
+    (("gta", "vice city"), "#gta6 #gta6gameplay #vicecity"),
+    (("überfall", "raub", "heist", "bank", "einbruch"), "#heist #überfall"),
+    (("fortnite",), "#fortnite"),
+    (("minecraft",), "#minecraft"),
+]
+REACH_TAGS = "#fyp #fürdich #viral"
+
+
+def auto_hashtags(conf, stream_title, reason, limit=10):
+    """Eigene Hashtags + passende zum Clip-Inhalt + Reichweite (ohne doppelte, max. `limit`)."""
+    r, t = (reason or "").lower(), (stream_title or "").lower()
+    parts = []
+    for keys, tags in AUTO_TAG_RULES:
+        if any(k in r for k in keys):
+            parts.append(tags)
+    for keys, tags in TITLE_TAG_RULES:
+        if any(k in t for k in keys) or (keys[0] == "gta" and "cops" in r):
+            parts.append(tags)
+    own = conf.get("hashtags", "").split()
+    must = [t for t in own if "ximjxstinn" in t.lower()] + REACH_TAGS.split()[:2]  # dein Name + #fyp #fürdich
+    out, seen = [], set()
+
+    def add(tag):
+        if tag.startswith("#") and tag.lower() not in seen:
+            seen.add(tag.lower())
+            out.append(tag)
+    for tag in " ".join(parts).split():
+        add(tag)
+    for tag in own:
+        if len(out) >= limit - len(must):
+            break
+        add(tag)
+    for tag in must:
+        add(tag)
+    return " ".join(out[:limit + 2])
+
+
 def build_text(conf, stream_title, nr, reason="", short=False):
     title = conf["title"].replace("{stream}", stream_title or "Stream").replace("{nr}", str(nr))
-    tags = conf["hashtags"].strip()
+    tags = auto_hashtags(conf, stream_title, reason) if conf.get("auto_tags", True) else conf["hashtags"].strip()
     if short and "#shorts" not in tags.lower():
         tags = (tags + " #Shorts").strip()
     desc = conf["description"].replace("{stream}", stream_title or "").replace("{nr}", str(nr))

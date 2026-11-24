@@ -33,7 +33,7 @@ except ImportError:  # ältere Updater kennen live_clipper.py noch nicht → sel
     except Exception:
         live_clipper = None
 
-VERSION = "4.2"
+VERSION = "4.3"
 
 # Fertige Live-Profile für GTA 6 (jederzeit umschaltbar, gilt sofort – auch mitten im Stream)
 _ALL = ("cops", "siren", "shots", "explosion", "bluelight", "vision", "game", "voice", "chat", "clipreq")
@@ -2201,10 +2201,22 @@ class App:
                         self.log(f"   ✅ https://youtu.be/{vid}{note}")
                     else:
                         self.log(f"♪ TikTok: lade #{i + 1} hoch …")
+                        tags = " ".join(t for t in tags.split() if t.lower() != "#shorts")
                         pid, status = uploader.tt_upload(conf, path, f"{title} {tags}", self.log, cancel)
                         up["tt"] = pid
                         self.log("   ✅ " + ("In deiner TikTok-App als Entwurf – Benachrichtigung öffnen und posten!"
                                            if status == "SEND_TO_USER_INBOX" else f"Gepostet ({status})"))
+                        if status == "SEND_TO_USER_INBOX":
+                            # TikTok lässt bei Entwürfen keinen Text mitschicken → Text bereitlegen
+                            caption = f"{title} {tags}".strip()
+                            try:
+                                with open(os.path.splitext(path)[0] + "_tiktok-text.txt", "w", encoding="utf-8") as cf:
+                                    cf.write(caption + "\n")
+                            except OSError:
+                                pass
+                            h["tt_caption"] = caption
+                            self.ui(lambda c=caption: (self.root.clipboard_clear(), self.root.clipboard_append(c)))
+                            self.log(f"   📋 Text + Hashtags kopiert (Strg+V) – beim Posten einfügen: {caption}")
                     done += 1
                 except uploader.UploadError as e:
                     if "Abgebrochen" in str(e):
@@ -2317,6 +2329,9 @@ class App:
         row("Beschreibung", desc)
         tags = tk.StringVar(value=conf.get("hashtags"))
         row("Hashtags", ttk.Entry(f, textvariable=tags))
+        autotags = tk.BooleanVar(value=conf.get("auto_tags", True))
+        ttk.Checkbutton(f, text="#️⃣ Hashtags automatisch passend zum Clip ergänzen (Cops, Explosion, Heist, #fyp …)",
+                        variable=autotags).grid(row=r, column=1, sticky="w"); r += 1
         amax = tk.IntVar(value=conf.get("auto_max", 3))
         row("Auto-Upload: beste", ttk.Spinbox(f, from_=1, to=15, textvariable=amax, width=5))
         approve = tk.BooleanVar(value=conf.get("approve", True))
@@ -2331,7 +2346,7 @@ class App:
                          "yt_auto": bool(yt_auto.get()), "tt_client_key": tt_key.get().strip(),
                          "tt_client_secret": tt_sec.get().strip(), "tt_mode": modes[tt_mode.get()],
                          "tt_auto": bool(tt_auto.get()), "title": title.get(),
-                         "description": desc.get("1.0", "end").strip(), "hashtags": tags.get(),
+                         "description": desc.get("1.0", "end").strip(), "hashtags": tags.get(), "auto_tags": bool(autotags.get()),
                          "approve": bool(approve.get())})
             try:
                 conf["auto_max"] = int(amax.get())
