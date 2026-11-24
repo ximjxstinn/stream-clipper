@@ -33,7 +33,7 @@ except ImportError:  # ältere Updater kennen live_clipper.py noch nicht → sel
     except Exception:
         live_clipper = None
 
-VERSION = "3.2"
+VERSION = "3.3"
 import sys
 SETTINGS_FILE = os.path.join(core.APP_DIR, "settings.json")
 SESSION_DIR = os.path.join(core.APP_DIR, "gespeichert")
@@ -48,6 +48,7 @@ MUTED = "#adadb8"
 GOOD = "#00f593"
 
 VIDEO_EXTS = (".mp4", ".mkv", ".mov", ".flv", ".ts", ".webm", ".avi", ".m4v")
+MODES = ["Normal (nur die besten)", "Maximal (alles Spannende)"]
 FORMATS = ["16:9 (YouTube/Twitch)", "9:16 (TikTok/Shorts)", "Beides"]
 VSTYLES = {"Blur-Hintergrund": "blur", "Mitte zuschneiden": "crop"}
 QUALITIES = ["1080p", "720p", "Beste"]
@@ -55,7 +56,7 @@ QUALITIES = ["1080p", "720p", "Beste"]
 DEFAULTS = {
     "channel": "ximjxstinn", "count": 10, "pre": 18, "post": 10, "min_gap": 90, "skip_start": 2,
     "w_chat": 65, "audio": True, "fmt": FORMATS[2], "vstyle": "Blur-Hintergrund", "quality": "1080p",
-    "bestof": False, "nomenu": True, "keywords": core.DEFAULT_KEYWORDS,
+    "bestof": False, "nomenu": True, "vis": True, "mode": "Maximal (alles Spannende)", "live_times": [], "keywords": core.DEFAULT_KEYWORDS,
     "outdir": os.path.join(os.path.expanduser("~"), "Videos", "Stream Clips"),
     "auto": False, "seen": [], "autostart": False, "autoupdate": True, "last_session": "", "tray": True, "tray_hint_shown": False, "live_popup": True, "live": False, "live_sens": "Maximal (alles Spannende)", "live_len": 30, "live_max": 100, "win_zoomed": True, "win_geo": "",
 }
@@ -84,6 +85,12 @@ class App:
             if extra:
                 self.s["keywords"] = (self.s.get("keywords", "").rstrip(", ") + ", " + ", ".join(extra)).strip(", ")
             self.s["mig_31"] = True
+            self.save()
+        if not self.s.get("mig_33"):
+            # Einmalig: auch beim Analysieren alles Spannende + Szenen-Erkennung im Bild
+            self.s["mode"] = MODES[1]
+            self.s["vis"] = True
+            self.s["mig_33"] = True
             self.save()
         self.q = queue.Queue()
         self.runner = None
@@ -288,6 +295,15 @@ class App:
         self.v_bestof = tk.BooleanVar(value=s["bestof"])
         ttk.Checkbutton(left, text="Zusätzlich Best-of-Video zusammenschneiden", variable=self.v_bestof).grid(
             row=r, column=0, columnspan=3, sticky="w", pady=(4, 0))
+        r += 1
+        self.v_vis = tk.BooleanVar(value=s.get("vis", True))
+        ttk.Checkbutton(left, text="Szenen-Erkennung im Bild (Action, Verfolgungen, Kämpfe)",
+                        variable=self.v_vis).grid(row=r, column=0, columnspan=3, sticky="w", pady=(2, 0))
+        r += 1
+        ttk.Label(left, text="Modus", style="Panel.TLabel").grid(row=r, column=0, sticky="w", pady=2)
+        self.v_mode = tk.StringVar(value=s.get("mode", MODES[1]))
+        ttk.Combobox(left, textvariable=self.v_mode, values=MODES, state="readonly", width=22).grid(
+            row=r, column=1, columnspan=2, sticky="we", pady=2)
         r += 1
         self.v_nomenu = tk.BooleanVar(value=s.get("nomenu", True))
         ttk.Checkbutton(left, text="Menüs, Einstellungen & Pause rausfiltern (Bildanalyse)",
@@ -503,7 +519,7 @@ class App:
             "min_gap": num(self.v_gap, 90), "skip_start": num(self.v_skip, 2), "w_chat": num(self.v_w, 65),
             "audio": bool(self.v_audio.get()), "fmt": self.v_fmt.get(), "vstyle": self.v_vstyle.get(),
             "quality": self.v_quality.get(), "bestof": bool(self.v_bestof.get()),
-            "nomenu": bool(self.v_nomenu.get()),
+            "nomenu": bool(self.v_nomenu.get()), "vis": bool(self.v_vis.get()), "mode": self.v_mode.get(),
             "keywords": self.t_kw.get("1.0", "end").strip(), "outdir": self.v_out.get().strip() or DEFAULTS["outdir"],
             "auto": bool(self.v_auto.get()), "autostart": bool(self.v_autostart.get()),
             "autoupdate": bool(self.v_autoupdate.get()), "tray": bool(self.v_tray.get()),
@@ -743,6 +759,9 @@ class App:
             self._show({"kind": "live", "id": sid, "title": title}, [], [], autosave=False)
             self.log(f"🔴 Neue Live-Liste für „{title}“ – Live-Clips landen hier.")
         self.highlights.append(h)
+        if self.s.get("live_list_id") != sid:
+            self.s["live_list_id"], self.s["live_times"] = sid, []
+        self.s.setdefault("live_times", []).append(round(h["time"], 1))
         i = len(self.highlights) - 1
         self.tree.insert("", "end", iid=str(i), values=(
             i + 1, core.fmt_time(h["time"]), h["score"], self._status_text(h), h["reason"], h["chat"]))
@@ -1069,14 +1088,36 @@ class App:
                 srt = sorted(loud)
                 self.log(f"   Aufnahme: {core.fmt_time(length or len(loud))} · Ton: leise {srt[len(srt)//10]:.0f} dB, "
                          f"normal {srt[len(srt)//2]:.0f} dB, laut {srt[int(len(srt)*0.99)]:.0f} dB")
-        if not msgs and not loud:
-            raise RuntimeError("Keine Daten zum Analysieren (weder Chat noch Audio).")
-        self.log("🧠 Suche die besten Stellen …")
+        motion = []
+        if st.get("vis", True):
+            try:
+                motion = core.analyze_motion(src, work, self.runner, self.log, length)
+            except core.Cancelled:
+                raise
+            except Exception as e:
+                self.log(f"⚠ Szenen-Erkennung im Bild ging nicht ({str(e)[:100]}) – mache ohne weiter.")
+        if not msgs and not loud and not motion:
+            raise RuntimeError("Keine Daten zum Analysieren (weder Chat noch Ton noch Bild).")
+        maximal = st.get("mode", "").startswith("Maximal")
         want = st["count"]
+        gap = st["min_gap"]
+        if maximal:
+            want = max(want, max(20, int((length or 3600) / 240)))  # ~1 Clip pro 4 Min. Stream, mind. 20
+            gap = min(gap, 45)
+            self.log(f"🧠 Maximal-Modus: suche bis zu {want} spannende Szenen (Abstand ≥ {gap} s) …")
+        else:
+            self.log("🧠 Suche die besten Stellen …")
         hl, curve = core.find_highlights(
-            msgs, loud, length, count=want * 3 if st.get("nomenu", True) else want, pre=st["pre"], post=st["post"], min_gap=st["min_gap"],
-            skip_start=st["skip_start"] * 60, w_chat=st["w_chat"] / 100, keywords=st["keywords"],
-            raids=info.get("raids"), clip_reqs=info.get("clips"), log=self.log)
+            msgs, loud, length, count=want * 3 if st.get("nomenu", True) else want, pre=st["pre"], post=st["post"],
+            min_gap=gap, skip_start=st["skip_start"] * 60, w_chat=st["w_chat"] / 100, keywords=st["keywords"],
+            raids=info.get("raids"), clip_reqs=info.get("clips"), log=self.log, motion=motion, maximal=maximal)
+        if maximal and src.get("kind") == "vod" and self.s.get("live_times"):
+            # Szenen, die der Live-Clipper schon geclippt hat, nicht doppelt schneiden
+            lt = self.s["live_times"]
+            before = len(hl)
+            hl = [h for h in hl if all(abs(h["time"] - t) > 25 for t in lt)]
+            if len(hl) < before:
+                self.log(f"   ↪ {before - len(hl)} Szene(n) hat der Live-Clipper schon – übersprungen.")
         n_learn = len(core.load_learning()["examples"])
         if n_learn:
             self.log(f"🧠 Nutze {n_learn} Bewertungen von dir, um nach deinem Geschmack zu sortieren.")
@@ -1879,7 +1920,7 @@ class App:
         if not new:
             self.log("Auto-Modus: kein neuer Stream.")
             return
-        if self.s.get("live"):
+        if self.s.get("live") and not st.get("mode", "").startswith("Maximal"):
             # Der Live-Clipper hat diese Streams schon live geclippt → nicht doppelt aus dem VOD clippen
             self.s.setdefault("seen", []).extend(v["id"] for v in new)
             self.s["seen"] = self.s["seen"][-100:]

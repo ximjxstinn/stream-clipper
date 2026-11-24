@@ -1,6 +1,6 @@
 {
-  "version": "3.2",
-  "notes": "Neu: Clip-Vorschau in der Liste + Vorschau-Popup bei jedem Live-Clip",
+  "version": "3.3",
+  "notes": "Neu: Szenen-Erkennung im Bild + Maximal-Modus – schneidet alles Spannende automatisch raus",
   "files": [
     "StreamClipper.pyw",
     "clipper_core.py",

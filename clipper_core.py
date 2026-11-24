@@ -429,6 +429,65 @@ def parse_rms_file(path):
 
 
 # --------------------------------------------------------------------------- #
+#  Szenen-Erkennung im Bild: wie viel passiert pro Sekunde?
+# --------------------------------------------------------------------------- #
+def analyze_motion(src, workdir, runner, log, duration=None):
+    """Bewegung im Bild pro Sekunde (0 = Standbild, hoch = Action/Verfolgung/Kampf/Kameraschwenk)."""
+    cache = os.path.join(workdir, "motion_v1.json")
+    if os.path.isfile(cache):
+        log("✔ Bild-Analyse schon im Cache")
+        with open(cache) as f:
+            return json.load(f)
+    if src["kind"] == "vod":
+        log("🎬 Lade das VOD in Mini-Qualität für die Szenen-Erkennung …")
+        last = [-10]
+
+        def on_dl(l):
+            m = re.search(r"\[download\]\s+(\d+(?:\.\d+)?)%", l)
+            if m and int(float(m.group(1))) >= last[0] + 20:
+                last[0] = int(float(m.group(1)))
+                log(f"   Bild-Download: {last[0]}%")
+        runner.run([tool("yt-dlp"), "--newline", "--no-part", "-N", "8",
+                    "-f", "160p/160p30/worst[vcodec!=none]/worst", "--ffmpeg-location",
+                    os.path.dirname(tool("ffmpeg")), "-o", os.path.join(workdir, "lowres.%(ext)s"),
+                    vod_url(src["id"])], on_line=on_dl)
+        media = next((os.path.join(workdir, f) for f in os.listdir(workdir) if f.startswith("lowres.")), None)
+        if not media:
+            raise RuntimeError("Mini-Video-Download fehlgeschlagen")
+        pre = []
+    else:
+        media, pre = src["path"], ["-hwaccel", "auto"]
+    log("🎬 Analysiere das Bild (Action, Verfolgungen, Kämpfe, Szenenwechsel) …")
+    out = "motion.txt"
+    last = [-10]
+
+    def on_line(l):
+        if duration and l.startswith("out_time_ms="):
+            try:
+                p = int(int(l.split("=")[1]) / 1e6 / duration * 100)
+            except ValueError:
+                return
+            if p >= last[0] + 10:
+                last[0] = p
+                log(f"   Bild: {min(p, 100)}%")
+    runner.run([tool("ffmpeg"), "-hide_banner", "-nostats", "-loglevel", "error", "-progress", "pipe:1", *pre,
+                "-i", media, "-an", "-vf", "fps=1,scale=96:54,format=gray,tblend=all_mode=difference,signalstats,"
+                f"metadata=print:key=lavfi.signalstats.YAVG:file={out}", "-f", "null", "-"],
+               cwd=workdir, on_line=on_line)
+    vals = []
+    with open(os.path.join(workdir, out), encoding="utf-8", errors="replace") as f:
+        for line in f:
+            if "YAVG=" in line:
+                try:
+                    vals.append(round(float(line.split("=", 1)[1]), 2))
+                except ValueError:
+                    vals.append(0.0)
+    with open(cache, "w") as f:
+        json.dump(vals, f)
+    return vals
+
+
+# --------------------------------------------------------------------------- #
 #  Highlight-Erkennung v2
 # --------------------------------------------------------------------------- #
 LEARN_FILE = os.path.join(APP_DIR, "lernen.json")
@@ -537,7 +596,7 @@ def model_prob(w, f):
 
 def find_highlights(msgs=None, loudness=None, duration=None, *, count=10, pre=18, post=10,
                     min_gap=90, skip_start=120, w_chat=0.65, keywords=DEFAULT_KEYWORDS,
-                    raids=None, clip_reqs=None, max_len=60, log=None):
+                    raids=None, clip_reqs=None, max_len=60, log=None, motion=None, maximal=False):
     """Gibt (highlights, kurve) zurück. kurve = Liste (zeit, score) für die Grafik."""
     log = log or (lambda *_: None)
     msgs = msgs or []
@@ -627,6 +686,21 @@ def find_highlights(msgs=None, loudness=None, duration=None, *, count=10, pre=18
     an = [min(v, 3.0) for v in voice]
     crn = [min(c / 4.0, 2.0) for c in crowd]
     combined = [wc * (0.7 * cn[i] + 0.3 * kn[i] * min(1.0, cn[i] * 2)) + wa * an[i] for i in range(nb)]
+    # --- Szenen im Bild: viel Bewegung im Vergleich zum Rest = Action ---------------
+    vn = [0.0] * nb
+    if motion and len(motion) > 30:
+        mb = [0.0] * nb
+        for i in range(nb):
+            seg = motion[i * BIN:(i + 1) * BIN]
+            mb[i] = sum(seg) / len(seg) if seg else 0.0
+        base = rolling_median(mb, 60)
+        raw = [0.0 if mb[i] < 1.5 else max(0.0, (mb[i] - base[i]) / (base[i] * 0.6 + 1.0)) for i in range(nb)]
+        raw = smooth(raw, 1)
+        vn = norm(raw, 0.8)
+        wv = 0.6 if maximal else 0.35
+        if not has_chat and not has_audio:
+            wv = 1.0
+        combined = [combined[i] + wv * vn[i] for i in range(nb)]
     # "clip" / "!clip" im Chat (auch von dir) = jemand fand die Stelle gut genug zum Clippen
     clip_bins = [0] * nb
     for ct in clip_reqs:
@@ -651,7 +725,7 @@ def find_highlights(msgs=None, loudness=None, duration=None, *, count=10, pre=18
     gap_bins = max(1, int(min_gap // BIN))
     cands = []
     for i in order:
-        if combined[i] < 0.15 or len(cands) >= count * 3:
+        if combined[i] < (0.06 if maximal else 0.15) or len(cands) >= count * 3:
             break
         if all(abs(i - j) >= gap_bins for j in cands):
             cands.append(i)
@@ -688,7 +762,7 @@ def find_highlights(msgs=None, loudness=None, duration=None, *, count=10, pre=18
     top = final[ranked[0]] or 1e-9
     # Lieber weniger, dafür gute Clips: schwache Kandidaten fliegen raus
     ref = final[ranked[min(2, len(ranked) - 1)]]  # dritt-bester als Maßstab, damit ein Mega-Moment nicht alles killt
-    chosen = [i for n, i in enumerate(ranked[:count]) if weak or n < 3 or final[i] >= 0.45 * ref]
+    chosen = [i for n, i in enumerate(ranked[:count]) if maximal or weak or n < 3 or final[i] >= 0.45 * ref]
     if len(chosen) < len(ranked[:count]):
         log(f"ℹ Nur {len(chosen)} Stellen waren wirklich stark – den Rest lasse ich weg.")
 
@@ -697,7 +771,10 @@ def find_highlights(msgs=None, loudness=None, duration=None, *, count=10, pre=18
         t = i * BIN + BIN / 2
         chat_led = has_chat and wc * cn[i] > 0 and wc * cn[i] >= wa * an[i]
         # Den eigentlichen Moment finden: Chat reagiert 5-20 s später (Stream-Delay + Reaktionszeit)
-        if has_audio:
+        visual_led = vn[i] > 0.3 and vn[i] >= an[i] and not chat_led
+        if visual_led:
+            moment = t  # Bild-Action: der Moment ist da, wo das Bild am meisten los ist
+        elif has_audio:
             lo_s = int(max(0, t - 25)) if chat_led else int(max(0, i * BIN - BIN))
             hi_s = int(t + 2) if chat_led else int(i * BIN + 2 * BIN)
             window = [(loudness[s], s) for s in range(lo_s, min(hi_s, len(loudness)))]
@@ -727,6 +804,9 @@ def find_highlights(msgs=None, loudness=None, duration=None, *, count=10, pre=18
                 reasons.append(f"Stimme +{max(near):.0f} dB")
         if clip_bins[i]:
             reasons.insert(0, "✂ jemand wollte das clippen")
+        near_v = max(vn[max(0, i - 1):i + 2]) if vn else 0.0
+        if near_v > 0.6:
+            reasons.append("🎬 viel Action im Bild")
         if model and model_prob(model, feats[i]) > 0.65:
             reasons.append("👍 passt zu deinem Geschmack")
         sample = _top_messages([m[2] for m in msgs if start <= m[0] <= end + 15])

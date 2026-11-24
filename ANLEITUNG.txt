@@ -14,6 +14,15 @@ SO GEHT'S
   4. "Ausgewählte clippen" oder "Alle clippen"
   Oder einfach "Alles automatisch" = analysieren + alle Top-Clips schneiden.
 
+NEU IN 3.3
+  - Szenen-Erkennung im Bild: Die App schaut, wie viel im Bild passiert (schnelle Fahrten,
+    Verfolgungsjagden, Kämpfe, Explosionen, Kameraschwenks) und schneidet Action-Szenen raus –
+    auch wenn Chat und Stimme ruhig sind. Bei VODs wird dafür eine Mini-Version (160p) geladen.
+  - Modus "Maximal (alles Spannende)" auch beim Analysieren/Auto-Modus (ist eingestellt):
+    bis zu 1 Clip pro 4 Minuten Stream (mind. 20), Abstand nur 45 s, schwache Stellen bleiben drin.
+  - Läuft der Live-Clipper, schneidet der Auto-Modus im Maximal-Modus nach dem Stream zusätzlich
+    die Szenen aus dem VOD, die live noch nicht geclippt wurden.
+
 NEU IN 3.2
   - Vorschau: Clip in der Liste anklicken -> 3 Bilder (Anfang/Mitte/Ende) + "▶ Abspielen".
   - Live-Popup: Bei jedem neuen LIVE-Clip erscheint unten rechts ein kleines Fenster mit Vorschau,
