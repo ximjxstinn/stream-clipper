@@ -599,6 +599,28 @@ class VideoReader(threading.Thread):
 
 
 # --------------------------------------------------------------------------- #
+#  🤖 Automatisches Profil: stellt sich selbst um, je nachdem was gerade im Spiel los ist
+# --------------------------------------------------------------------------- #
+AUTO_MODES = {
+    # name: (auslöser, abstand s, max/stunde, schüsse ab, clips pro verfolgung)
+    "action": (("cops", "explosion", "shots", "siren", "bluelight", "clipreq"), 40, 60, 3, 6),
+    "normal": (("cops", "explosion", "shots", "siren", "bluelight", "clipreq"), 60, 30, 4, 3),
+    "ruhig": (("cops", "explosion", "clipreq"), 120, 10, 8, 1),
+}
+AUTO_NAMES = {"action": "💰 Action-Modus (Cops/Explosionen gerade eben)",
+              "normal": "🎮 Normal-Modus", "ruhig": "😎 Ruhig-Modus (lange nichts los)"}
+
+
+def auto_mode(det, now):
+    last = max(det.police_seen, det.boom_seen)
+    if last and now - last < 180:
+        return "action"
+    if det.start and now - det.start > 15 * 60 and (not last or now - last > 15 * 60):
+        return "ruhig"
+    return "normal"
+
+
+# --------------------------------------------------------------------------- #
 #  Spannungs-Check: fertigen Clip anschauen + anhören und 0–100 Punkte geben
 # --------------------------------------------------------------------------- #
 def _med(vals):
@@ -738,6 +760,7 @@ class Detector:
         self.police_seen = 0.0            # wann zuletzt Cops (Minimap blinkt)
         self.chase_clips = 0
         self.max_chase = 3                # höchstens so viele Clips pro Verfolgung
+        self.boom_seen = 0.0              # wann zuletzt eine echte Explosion
         self.min_shots = 4
         self.norm_game = None      # normales Spiel-dB (für die Spannungs-Bewertung der fertigen Clips)
         self.norm_motion = None
@@ -908,6 +931,7 @@ class Detector:
             boom_ok = (not lowdb) or (pre and post and max(post) - pre[len(pre) // 2] >= 20 and max(post) >= -42)
             if boom_ok:
                 explosion = flash
+                self.boom_seen = now
         cops_ctx = now - self.police_seen < 10
         # Schüsse nur mit Action drumherum (Cops, Bewegung, Explosion) – Schüsse im Hintergrund zählen nicht
         if shots and not (cops_ctx or (vis or 0) >= 1.3 or flash):
@@ -1120,6 +1144,15 @@ class LiveClipper:
             # „Modus“ + „Szenen-Erkennung im Bild“ aus dem Hauptfenster gelten auch live
             sens = SENSITIVITY.get(self.st.get("live_sens", "Mittel"), SENSITIVITY["Mittel"])
             det.t_chat, det.min_people = sens[0], sens[3]
+            if self.st.get("live_autoprof"):
+                mode = auto_mode(det, time.time())
+                trigs, gap, hour, shots_n, chase = AUTO_MODES[mode]
+                det.enabled = {k: (k in trigs) for k in TRIGGERS}
+                det.cooldown, det.max_per_hour, det.min_shots, det.max_chase = gap, hour, shots_n, chase
+                if mode != getattr(self, "_auto_mode", None):
+                    self._auto_mode = mode
+                    self.log(f"🤖 Auto-Profil: {AUTO_NAMES[mode]}")
+                    self.on_state(f"🔴 LIVE – {self.count} Clips · {AUTO_NAMES[mode].split(' (')[0]}")
             if not self.st.get("vis", True):
                 det.enabled["vision"] = det.enabled["bluelight"] = False
             trig = det.tick(time.time())

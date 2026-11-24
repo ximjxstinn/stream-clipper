@@ -14,6 +14,13 @@ SO GEHT'S
   4. "Ausgewählte clippen" oder "Alle clippen"
   Oder einfach "Alles automatisch" = analysieren + alle Top-Clips schneiden.
 
+NEU IN 4.1 – 🤖 AUTOMATISCHES PROFIL
+  - Profil „🤖 GTA 6 – Automatisch“ (jetzt Standard): stellt sich während des Streams selbst um.
+    · 💰 Action-Modus: Cops oder Explosion in den letzten 3 Min. → viele Clips (40 s Abstand, 6 pro Verfolgung, Schüsse ab 3)
+    · 🎮 Normal-Modus: wie Standard (60 s Abstand, 3 pro Verfolgung)
+    · 😎 Ruhig-Modus: 15 Min. nichts los → nur Cops/Explosionen/!clip, max. 10 pro Stunde
+  - Der aktuelle Modus steht im Log und beim Live-Status.
+
 NEU IN 4.0 – AN DEINEM ECHTEN STREAM EINGESTELLT (Bank-Überfall)
   - 🚔 NEU: Cops-Erkennung über die Minimap – blinkt sie rot/blau, sind die Cops hinter dir.
     Funktioniert am PC und auf der PS5 (gleiches HUD). Höchstens X Clips pro Verfolgung (einstellbar).

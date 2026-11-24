@@ -1,6 +1,6 @@
 {
-  "version": "4.0",
-  "notes": "An echtem GTA-6-Stream eingestellt: Cops-Erkennung (Minimap), echte Explosionen, Analysieren nimmt nur die besten Stellen",
+  "version": "4.1",
+  "notes": "Automatisches Profil: stellt sich je nach Spielgeschehen selbst um (Action/Normal/Ruhig)",
   "files": [
     "StreamClipper.pyw",
     "clipper_core.py",

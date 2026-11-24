@@ -33,7 +33,7 @@ except ImportError:  # ältere Updater kennen live_clipper.py noch nicht → sel
     except Exception:
         live_clipper = None
 
-VERSION = "4.0"
+VERSION = "4.1"
 
 # Fertige Live-Profile für GTA 6 (jederzeit umschaltbar, gilt sofort – auch mitten im Stream)
 _ALL = ("cops", "siren", "shots", "explosion", "bluelight", "vision", "game", "voice", "chat", "clipreq")
@@ -44,27 +44,37 @@ def _trig(*on):
 
 
 PROFILE_KEYS = ("live_trig", "live_game", "live_vis", "live_voice", "live_gap", "live_hour", "live_shots",
-                "live_rate", "live_rate_min", "live_len", "live_chase")
+                "live_rate", "live_rate_min", "live_len", "live_chase", "live_autoprof")
+AUTO_PROFILE = "🤖 GTA 6 – Automatisch (stellt sich selbst um)"
 GTA_PROFILES = {
+    AUTO_PROFILE: {
+        "live_trig": _trig("cops", "explosion", "shots", "siren", "bluelight", "clipreq"),
+        "live_game": 8, "live_vis": 1.8, "live_voice": 0, "live_gap": 60, "live_hour": 30, "live_shots": 4,
+        "live_rate": True, "live_rate_min": 35, "live_len": 30, "live_chase": 3, "live_autoprof": True},
     # Abgestimmt auf einen echten GTA-6-Stream (Bank-Überfall + Verfolgung): Cops + Explosionen sind die
     # zuverlässigsten Signale. Reden, „Spiel lauter“ und „nur Bewegung“ lösen nicht mehr allein aus.
     "🎮 GTA 6 – Standard (empfohlen)": {
+        "live_autoprof": False,
         "live_trig": _trig("cops", "explosion", "shots", "siren", "bluelight", "clipreq"),
         "live_game": 8, "live_vis": 1.8, "live_voice": 0, "live_gap": 60, "live_hour": 30, "live_shots": 4,
         "live_rate": True, "live_rate_min": 35, "live_len": 30, "live_chase": 3},
     "🚔 GTA 6 – Polizei & Verfolgungsjagd": {
+        "live_autoprof": False,
         "live_trig": _trig("cops", "siren", "bluelight", "explosion", "shots", "clipreq"),
         "live_game": 8, "live_vis": 1.8, "live_voice": 0, "live_gap": 45, "live_hour": 40, "live_shots": 4,
         "live_rate": True, "live_rate_min": 30, "live_len": 30, "live_chase": 5},
     "💰 GTA 6 – Überfall / Einbruch / Schießerei": {
+        "live_autoprof": False,
         "live_trig": _trig("cops", "explosion", "shots", "siren", "bluelight", "clipreq"),
         "live_game": 8, "live_vis": 1.8, "live_voice": 0, "live_gap": 40, "live_hour": 60, "live_shots": 3,
         "live_rate": True, "live_rate_min": 30, "live_len": 30, "live_chase": 6},
     "🔥 GTA 6 – Nur die krassesten Momente": {
+        "live_autoprof": False,
         "live_trig": _trig("cops", "explosion", "clipreq"),
         "live_game": 10, "live_vis": 2.5, "live_voice": 0, "live_gap": 120, "live_hour": 10, "live_shots": 8,
         "live_rate": True, "live_rate_min": 45, "live_len": 30, "live_chase": 1},
     "😎 GTA 6 – Chillen / Freeroam": {
+        "live_autoprof": False,
         "live_trig": _trig("cops", "explosion", "clipreq"),
         "live_game": 10, "live_vis": 2.2, "live_voice": 0, "live_gap": 180, "live_hour": 8, "live_shots": 6,
         "live_rate": True, "live_rate_min": 45, "live_len": 30, "live_chase": 1},
@@ -122,6 +132,14 @@ class App:
                 self.s["keywords"] = (self.s.get("keywords", "").rstrip(", ") + ", " + ", ".join(extra)).strip(", ")
             self.s["mig_31"] = True
             self.save()
+        if not self.s.get("mig_41"):
+            self.s["mig_41"] = True
+            self.s["mig_40"] = True
+            self.s["mode"] = MODES[0]
+            if self.s.get("live_drop") == "delete":
+                self.s["live_drop"] = "keep"
+            self.root.after(1500, lambda: self.apply_live_profile(AUTO_PROFILE))
+            self.s["mig_38"] = True
         if not self.s.get("mig_40"):
             self.s["mig_40"] = True
             self.s["mode"] = MODES[0]  # Analysieren = nur die besten Stellen
@@ -831,6 +849,7 @@ class App:
         prof = self._profile(name) if name else None
         if prof and any(self.s.get(k) != prof.get(k) for k in PROFILE_KEYS if k in prof):
             self.s["live_profile"] = ""
+            self.s["live_autoprof"] = False
             self.v_live_profile.set(CUSTOM_PROFILE)
             self.save()
 
