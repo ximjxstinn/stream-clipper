@@ -14,6 +14,16 @@ SO GEHT'S
   4. "Ausgewählte clippen" oder "Alle clippen"
   Oder einfach "Alles automatisch" = analysieren + alle Top-Clips schneiden.
 
+NEU IN 3.8 – FERTIGE GTA-6-PROFILE
+  Im Live-Clipper-Bereich bei „Profil“ jederzeit umschalten (gilt sofort, auch mitten im Stream):
+  - 🎮 GTA 6 – Standard (empfohlen): alles Spannende, Stimme erst bei Schreien, max. 25 Clips/Std.
+  - 🚔 GTA 6 – Polizei & Verfolgungsjagd: Sirene, Blaulicht, Action, Crash – Stimme aus.
+  - 💰 GTA 6 – Überfall / Einbruch / Schießerei: schon ab 3 Schüssen, kurze Pausen, viele Clips.
+  - 🔥 GTA 6 – Nur die krassesten Momente: Dauerfeuer (8+ Schüsse), Explosionen, Polizei – max. 10/Std.
+  - 😎 GTA 6 – Chillen / Freeroam: nur große Momente, wenige Clips.
+  Eigene Profile: „⚙ Live-Auslöser einstellen“ → Werte ändern → „⭐ Als Profil speichern …“.
+  Wie hochgeladen wird (Freigabe/automatisch) bleibt beim Umschalten so, wie du es eingestellt hast.
+
 NEU IN 3.7.1 – EXPLOSIONEN NUR NOCH ECHT
   - 💥 zählt nur noch ein plötzlicher, sehr lauter Knall mit echtem Tiefbass, der danach grollt
     (Auto-Explosion, Gasflasche, Granate). Baby-Weinen, Schreie, Hupen und Musik lösen nicht mehr aus.

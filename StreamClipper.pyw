@@ -8,7 +8,7 @@ import threading
 import traceback
 import webbrowser
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from tkinter import ttk, filedialog, messagebox, simpledialog
 
 import clipper_core as core
 import updater
@@ -33,7 +33,41 @@ except ImportError:  # ältere Updater kennen live_clipper.py noch nicht → sel
     except Exception:
         live_clipper = None
 
-VERSION = "3.7.1"
+VERSION = "3.8"
+
+# Fertige Live-Profile für GTA 6 (jederzeit umschaltbar, gilt sofort – auch mitten im Stream)
+_ALL = ("siren", "shots", "explosion", "bluelight", "vision", "game", "voice", "chat", "clipreq")
+
+
+def _trig(*on):
+    return {k: (k in on) for k in _ALL}
+
+
+PROFILE_KEYS = ("live_trig", "live_game", "live_vis", "live_voice", "live_gap", "live_hour", "live_shots",
+                "live_rate", "live_rate_min", "live_len")
+GTA_PROFILES = {
+    "🎮 GTA 6 – Standard (empfohlen)": {
+        "live_trig": _trig("siren", "shots", "explosion", "bluelight", "vision", "game", "voice", "clipreq"),
+        "live_game": 7, "live_vis": 1.8, "live_voice": 15, "live_gap": 60, "live_hour": 25, "live_shots": 4,
+        "live_rate": True, "live_rate_min": 35, "live_len": 30},
+    "🚔 GTA 6 – Polizei & Verfolgungsjagd": {
+        "live_trig": _trig("siren", "bluelight", "shots", "explosion", "vision", "game", "clipreq"),
+        "live_game": 6, "live_vis": 1.6, "live_voice": 0, "live_gap": 45, "live_hour": 40, "live_shots": 4,
+        "live_rate": True, "live_rate_min": 30, "live_len": 30},
+    "💰 GTA 6 – Überfall / Einbruch / Schießerei": {
+        "live_trig": _trig("shots", "explosion", "siren", "bluelight", "vision", "game", "voice", "clipreq"),
+        "live_game": 6, "live_vis": 1.6, "live_voice": 15, "live_gap": 40, "live_hour": 60, "live_shots": 3,
+        "live_rate": True, "live_rate_min": 30, "live_len": 30},
+    "🔥 GTA 6 – Nur die krassesten Momente": {
+        "live_trig": _trig("shots", "explosion", "siren", "bluelight", "clipreq"),
+        "live_game": 10, "live_vis": 2.5, "live_voice": 0, "live_gap": 120, "live_hour": 10, "live_shots": 8,
+        "live_rate": True, "live_rate_min": 50, "live_len": 30},
+    "😎 GTA 6 – Chillen / Freeroam": {
+        "live_trig": _trig("explosion", "shots", "siren", "vision", "voice", "clipreq"),
+        "live_game": 10, "live_vis": 2.2, "live_voice": 18, "live_gap": 180, "live_hour": 8, "live_shots": 6,
+        "live_rate": True, "live_rate_min": 45, "live_len": 30},
+}
+CUSTOM_PROFILE = "✏ Eigene Einstellungen"
 import sys
 SETTINGS_FILE = os.path.join(core.APP_DIR, "settings.json")
 SESSION_DIR = os.path.join(core.APP_DIR, "gespeichert")
@@ -58,7 +92,7 @@ DEFAULTS = {
     "w_chat": 65, "audio": True, "fmt": FORMATS[2], "vstyle": "Blur-Hintergrund", "quality": "1080p",
     "bestof": False, "nomenu": True, "vis": True, "mode": "Maximal (alles Spannende)", "live_times": [], "keywords": core.DEFAULT_KEYWORDS,
     "outdir": os.path.join(os.path.expanduser("~"), "Videos", "Stream Clips"),
-    "auto": False, "seen": [], "autostart": False, "autoupdate": True, "last_session": "", "tray": True, "tray_hint_shown": False, "live_popup": True, "live_voice": 12, "live_trig": {}, "live_game": 6, "live_vis": 1.6, "live_gap": 60, "live_hour": 30, "live_shots": 4, "live_rate": True, "live_rate_min": 35, "live_drop": "keep", "live_auto": "approve", "live": False, "live_sens": "Maximal (alles Spannende)", "live_len": 30, "live_max": 100, "win_zoomed": True, "win_geo": "",
+    "auto": False, "seen": [], "autostart": False, "autoupdate": True, "last_session": "", "tray": True, "tray_hint_shown": False, "live_popup": True, "live_voice": 12, "live_trig": {}, "live_game": 6, "live_vis": 1.6, "live_gap": 60, "live_hour": 30, "live_shots": 4, "live_rate": True, "live_rate_min": 35, "live_drop": "keep", "live_auto": "approve", "live_profile": "", "live_profiles": {}, "live": False, "live_sens": "Maximal (alles Spannende)", "live_len": 30, "live_max": 100, "win_zoomed": True, "win_geo": "",
 }
 
 
@@ -86,6 +120,9 @@ class App:
                 self.s["keywords"] = (self.s.get("keywords", "").rstrip(", ") + ", " + ", ".join(extra)).strip(", ")
             self.s["mig_31"] = True
             self.save()
+        if not self.s.get("mig_38"):
+            self.s["mig_38"] = True
+            self.root.after(1500, lambda: self.apply_live_profile("🎮 GTA 6 – Standard (empfohlen)"))
         if not self.s.get("mig_35"):
             if int(self.s.get("live_voice", 12) or 0) < 12:
                 self.s["live_voice"] = 12  # normales Reden soll nicht mehr clippen
@@ -398,6 +435,13 @@ class App:
         ttk.Label(left, text="5 = schon lautes Reden · 10 = Rufen/Lachen · 15 = nur Schreien · 0 = Stimme egal",
                   style="Muted.TLabel", wraplength=380).grid(row=r, column=0, columnspan=3, sticky="w")
         r += 1
+        ttk.Label(left, text="Profil", style="Panel.TLabel").grid(row=r, column=0, sticky="w", pady=2)
+        self.v_live_profile = tk.StringVar(value=s.get("live_profile") or CUSTOM_PROFILE)
+        self.cb_live_profile = ttk.Combobox(left, textvariable=self.v_live_profile, state="readonly", width=30,
+                                            values=self._profile_names())
+        self.cb_live_profile.grid(row=r, column=1, columnspan=2, sticky="we", pady=2)
+        self.cb_live_profile.bind("<<ComboboxSelected>>", lambda e: self.apply_live_profile(self.v_live_profile.get()))
+        r += 1
         ttk.Button(left, text="⚙ Live-Auslöser einstellen (was & wie oft) …", command=self.live_trigger_settings).grid(
             row=r, column=0, columnspan=3, sticky="we", pady=(4, 2))
         r += 1
@@ -561,6 +605,8 @@ class App:
         self.save()
         if getattr(self, "live", None):
             self.live.st.update(self._live_settings())
+        if hasattr(self, "v_live_profile"):
+            self._mark_custom()
         return dict(s)
 
     def save(self):
@@ -745,6 +791,39 @@ class App:
             threading.Thread(target=job, daemon=True).start()
         ttk.Button(f, text="Verbinden", style="Accent.TButton", command=go).pack(anchor="e")
 
+    def _profile_names(self):
+        return list(GTA_PROFILES) + list(self.s.get("live_profiles") or {}) + [CUSTOM_PROFILE]
+
+    def _profile(self, name):
+        return GTA_PROFILES.get(name) or (self.s.get("live_profiles") or {}).get(name)
+
+    def apply_live_profile(self, name, quiet=False):
+        prof = self._profile(name)
+        if not prof:
+            self.s["live_profile"] = ""
+            self.save()
+            return
+        for k in PROFILE_KEYS:
+            if k in prof:
+                self.s[k] = json.loads(json.dumps(prof[k]))
+        self.s["live_profile"] = name
+        if hasattr(self, "v_live_voice"):
+            self.v_live_voice.set(int(self.s.get("live_voice", 12)))
+            self.v_live_len.set(int(self.s.get("live_len", 30)))
+            self.v_live_profile.set(name)
+        self.settings()
+        if not quiet:
+            self.log(f"🎛 Profil „{name}“ aktiv – gilt sofort.")
+
+    def _mark_custom(self):
+        """Nach Hand-Änderungen: passt nicht mehr zum Profil → „Eigene Einstellungen“."""
+        name = self.s.get("live_profile")
+        prof = self._profile(name) if name else None
+        if prof and any(self.s.get(k) != prof.get(k) for k in PROFILE_KEYS if k in prof):
+            self.s["live_profile"] = ""
+            self.v_live_profile.set(CUSTOM_PROFILE)
+            self.save()
+
     def live_trigger_settings(self):
         trig_names = live_clipper.TRIGGERS if live_clipper else {}
         cur = dict(self.s.get("live_trig") or {})
@@ -831,6 +910,28 @@ class App:
             ttk.Button(pf, text=txt, command=lambda l=lvl: preset(l)).pack(side="left", padx=4)
         r += 1
 
+        def load_prof(name):
+            prof = self._profile(name)
+            if not prof:
+                return
+            for k, var in vars_.items():
+                var.set(bool((prof.get("live_trig") or {}).get(k, True)))
+            for k in ("live_game", "live_voice", "live_gap", "live_hour", "live_shots", "live_rate_min"):
+                if k in prof and k in ents:
+                    ents[k].set(int(prof[k]))
+            if "live_vis" in prof:
+                ents["live_vis"].set(int(round(float(prof["live_vis"]) * 10)))
+            v_rate.set(bool(prof.get("live_rate", True)))
+        gf = ttk.Frame(f, style="Panel.TFrame")
+        gf.grid(row=r, column=0, columnspan=3, sticky="w", pady=(6, 0))
+        ttk.Label(gf, text="Werte aus Profil laden:", style="Panel.TLabel").pack(side="left")
+        v_lp = tk.StringVar(value="")
+        cb = ttk.Combobox(gf, textvariable=v_lp, state="readonly", width=36,
+                          values=[n for n in self._profile_names() if n != CUSTOM_PROFILE])
+        cb.pack(side="left", padx=4)
+        cb.bind("<<ComboboxSelected>>", lambda e: load_prof(v_lp.get()))
+        r += 1
+
         def save():
             def gi(k, d):
                 try:
@@ -850,10 +951,42 @@ class App:
             self.s["live_auto"] = next((k for k, t in autos.items() if t == v_auto.get()), "approve")
             self.v_live_voice.set(self.s["live_voice"])
             self.settings()
+            self._mark_custom()
             self.log("✔ Live-Auslöser gespeichert – gilt sofort, auch mitten im Stream.")
             win.destroy()
-        ttk.Button(f, text="Speichern (gilt sofort)", style="Accent.TButton", command=save).grid(
-            row=r, column=0, columnspan=3, sticky="e", pady=(12, 0))
+
+        def save_as():
+            name = simpledialog.askstring("Als Profil speichern", "Name für dein Profil (z. B. „Mein GTA Heist“):",
+                                          parent=win)
+            if not name or not name.strip():
+                return
+            name = "⭐ " + name.strip()[:40]
+            save()
+            profs = dict(self.s.get("live_profiles") or {})
+            profs[name] = {k: json.loads(json.dumps(self.s.get(k))) for k in PROFILE_KEYS}
+            self.s["live_profiles"] = profs
+            self.s["live_profile"] = name
+            self.cb_live_profile.configure(values=self._profile_names())
+            self.v_live_profile.set(name)
+            self.save()
+            self.log(f"⭐ Profil „{name}“ gespeichert – oben bei „Profil“ jederzeit auswählbar.")
+
+        def delete_prof():
+            name = self.s.get("live_profile")
+            if name not in (self.s.get("live_profiles") or {}):
+                messagebox.showinfo("Profil löschen", "Nur eigene ⭐-Profile können gelöscht werden.", parent=win)
+                return
+            if messagebox.askyesno("Profil löschen", f"„{name}“ löschen?", parent=win):
+                self.s["live_profiles"].pop(name, None)
+                self.s["live_profile"] = ""
+                self.cb_live_profile.configure(values=self._profile_names())
+                self.v_live_profile.set(CUSTOM_PROFILE)
+                self.save()
+        bf = ttk.Frame(f, style="Panel.TFrame")
+        bf.grid(row=r, column=0, columnspan=3, sticky="we", pady=(12, 0))
+        ttk.Button(bf, text="🗑 Eigenes Profil löschen", command=delete_prof).pack(side="left")
+        ttk.Button(bf, text="⭐ Als Profil speichern …", command=save_as).pack(side="left", padx=6)
+        ttk.Button(bf, text="Speichern (gilt sofort)", style="Accent.TButton", command=save).pack(side="right")
 
     def _toggle_live(self):
         on = bool(self.v_live.get())

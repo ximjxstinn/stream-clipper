@@ -1,6 +1,6 @@
 {
-  "version": "3.7.1",
-  "notes": "Explosionen nur noch echte Knalle mit Tiefbass (kein Baby/Schreien/Hupen mehr)",
+  "version": "3.8",
+  "notes": "Fertige GTA-6-Profile (Standard, Polizei, Überfall, Nur Krasses, Chillen) + eigene Profile speichern",
   "files": [
     "StreamClipper.pyw",
     "clipper_core.py",
