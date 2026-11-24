@@ -33,7 +33,7 @@ except ImportError:  # ältere Updater kennen live_clipper.py noch nicht → sel
     except Exception:
         live_clipper = None
 
-VERSION = "3.1"
+VERSION = "3.2"
 import sys
 SETTINGS_FILE = os.path.join(core.APP_DIR, "settings.json")
 SESSION_DIR = os.path.join(core.APP_DIR, "gespeichert")
@@ -57,7 +57,7 @@ DEFAULTS = {
     "w_chat": 65, "audio": True, "fmt": FORMATS[2], "vstyle": "Blur-Hintergrund", "quality": "1080p",
     "bestof": False, "nomenu": True, "keywords": core.DEFAULT_KEYWORDS,
     "outdir": os.path.join(os.path.expanduser("~"), "Videos", "Stream Clips"),
-    "auto": False, "seen": [], "autostart": False, "autoupdate": True, "last_session": "", "tray": True, "tray_hint_shown": False, "live": False, "live_sens": "Maximal (alles Spannende)", "live_len": 30, "live_max": 100, "win_zoomed": True, "win_geo": "",
+    "auto": False, "seen": [], "autostart": False, "autoupdate": True, "last_session": "", "tray": True, "tray_hint_shown": False, "live_popup": True, "live": False, "live_sens": "Maximal (alles Spannende)", "live_len": 30, "live_max": 100, "win_zoomed": True, "win_geo": "",
 }
 
 
@@ -353,6 +353,10 @@ class App:
         self.v_live_len = tk.IntVar(value=s.get("live_len", 30))
         ttk.Spinbox(left, from_=10, to=60, textvariable=self.v_live_len, width=6).grid(row=r, column=2, sticky="e")
         r += 1
+        self.v_live_popup = tk.BooleanVar(value=s.get("live_popup", True))
+        ttk.Checkbutton(left, text="Vorschau-Popup bei jedem neuen Live-Clip", variable=self.v_live_popup,
+                        command=self.settings).grid(row=r, column=0, columnspan=3, sticky="w")
+        r += 1
         self.v_tw_status = tk.StringVar(value=self._twitch_status())
         ttk.Button(left, text="🟣 Mit Twitch verbinden …", command=self.twitch_connect).grid(
             row=r, column=0, columnspan=2, sticky="we", pady=(4, 0))
@@ -408,6 +412,15 @@ class App:
         # ---- Hype-Kurve ----
         self.canvas = tk.Canvas(right, height=150, bg=PANEL, highlightthickness=0)
         self.canvas.pack(fill="x", pady=(10, 0))
+        # Vorschau des ausgewählten Clips
+        self.prev_bar = tk.Frame(right, bg=PANEL)
+        self.prev_img_lbl = tk.Label(self.prev_bar, bg=PANEL)
+        self.prev_img_lbl.pack(side="left", padx=8, pady=6)
+        self.prev_txt = tk.Label(self.prev_bar, bg=PANEL, fg=TEXT, justify="left", anchor="nw",
+                                 font=("Segoe UI", 10), wraplength=360)
+        self.prev_txt.pack(side="left", fill="both", expand=True, padx=8, pady=6)
+        ttk.Button(self.prev_bar, text="▶ Abspielen", command=self.view_clip).pack(side="right", padx=8)
+        self._prev_photo = None
         self.canvas.bind("<Configure>", lambda e: self._draw_curve())
         self.canvas.bind("<Button-1>", self._curve_click)
 
@@ -427,6 +440,7 @@ class App:
         self.tree.pack(side="left", fill="both", expand=True)
         sb.pack(side="left", fill="y")
         self.tree.bind("<Double-1>", self._open_moment)
+        self.tree.bind("<<TreeviewSelect>>", self._on_select)
         self.tree.tag_configure("done", foreground=GOOD)
         self.tree.tag_configure("good", background="#123d2c")
         self.tree.tag_configure("bad", foreground="#6b6b75")
@@ -493,7 +507,8 @@ class App:
             "keywords": self.t_kw.get("1.0", "end").strip(), "outdir": self.v_out.get().strip() or DEFAULTS["outdir"],
             "auto": bool(self.v_auto.get()), "autostart": bool(self.v_autostart.get()),
             "autoupdate": bool(self.v_autoupdate.get()), "tray": bool(self.v_tray.get()),
-            "live": bool(self.v_live.get()), "live_sens": self.v_live_sens.get(), "live_len": num(self.v_live_len, 30),
+            "live": bool(self.v_live.get()), "live_sens": self.v_live_sens.get(),
+            "live_popup": bool(self.v_live_popup.get()), "live_len": num(self.v_live_len, 30),
         })
         self.save()
         if getattr(self, "live", None):
@@ -734,6 +749,7 @@ class App:
         self._refresh_row(i)
         self.tree.see(str(i))
         self.save_session()
+        self._live_popup(i)
 
     def _live_stream_ended(self, stream):
         if not (self.meta and self.meta.get("kind") == "live" and self.highlights):
@@ -1305,8 +1321,8 @@ class App:
         else:
             messagebox.showinfo("Stelle", f"Spring in deiner Aufnahme zu {core.fmt_time(h['start'])}.")
 
-    def rate(self, good):
-        sel = self.tree.selection()
+    def rate(self, good, iids=None):
+        sel = iids or self.tree.selection()
         if not sel or not self.highlights:
             messagebox.showinfo("Bewerten", "Wähl zuerst einen Clip in der Liste aus.")
             return
@@ -1325,10 +1341,127 @@ class App:
         self.log(f"{'👍' if good else '👎'} gespeichert – die App kennt jetzt {n} Bewertungen. "
                  "Beim nächsten Analysieren wird danach sortiert.")
         self.save_session()
+        if iids:
+            return
         nxt = self.tree.next(sel[-1])
         if nxt:
             self.tree.selection_set(nxt)
             self.tree.see(nxt)
+
+    # ---------------------------------------------------------------- Vorschau --
+    def _clip_file(self, h):
+        files = h.get("files") or {}
+        return next((p for p in (files.get("wide"), files.get("tall")) if p and os.path.isfile(p)), None)
+
+    def _preview_async(self, h, done):
+        """Erzeugt die Vorschau im Hintergrund und ruft done(png) im UI-Thread auf."""
+        path = self._clip_file(h)
+        if not path:
+            return
+
+        def job():
+            try:
+                png = core.make_preview(path, os.path.splitext(path)[0] + "_vorschau.png", core.Runner(lambda *_: None))
+                self.ui(lambda: done(png))
+            except Exception:
+                pass
+        threading.Thread(target=job, daemon=True).start()
+
+    def _on_select(self, _=None):
+        sel = self.tree.selection()
+        if len(sel) != 1 or not self.highlights:
+            self.prev_bar.pack_forget()
+            return
+        i = int(sel[0])
+        h = self.highlights[i]
+        if not self._clip_file(h):
+            self.prev_bar.pack_forget()
+            return
+        self.prev_txt.configure(text=f"#{i + 1} · {core.fmt_time(h['time'])} · Hype {h['score']}\n{h['reason']}\n"
+                                     f"{self._status_text(h)}")
+        self.prev_img_lbl.configure(image="", text="⏳ Vorschau …", fg=MUTED)
+        self.prev_bar.pack(fill="x", pady=(8, 0), after=self.canvas)
+
+        def show(png):
+            if self.tree.selection() != sel:
+                return
+            try:
+                self._prev_photo = tk.PhotoImage(file=png)
+                self.prev_img_lbl.configure(image=self._prev_photo, text="")
+            except Exception:
+                self.prev_img_lbl.configure(text="(keine Vorschau)")
+        self._preview_async(h, show)
+
+    def _live_popup(self, i):
+        """Kleines Vorschau-Fenster unten rechts bei jedem neuen LIVE-Clip."""
+        if not self.s.get("live_popup", True) or i >= len(self.highlights):
+            return
+        h = self.highlights[i]
+
+        def show(png):
+            try:
+                win = tk.Toplevel(self.root)
+                win.overrideredirect(True)
+                win.attributes("-topmost", True)
+                try:
+                    win.attributes("-alpha", 0.96)
+                except tk.TclError:
+                    pass
+                win.configure(bg=ACCENT)
+                box = tk.Frame(win, bg=PANEL)
+                box.pack(padx=2, pady=2)
+                top = tk.Frame(box, bg=PANEL)
+                top.pack(fill="x", padx=10, pady=(8, 4))
+                tk.Label(top, text=f"✂ Neuer LIVE-Clip #{i + 1}", bg=PANEL, fg=TEXT,
+                         font=("Segoe UI Semibold", 11)).pack(side="left")
+                tk.Button(top, text="✕", bg=PANEL, fg=MUTED, bd=0, activebackground=PANEL,
+                          command=win.destroy).pack(side="right")
+                photo = tk.PhotoImage(file=png)
+                lbl = tk.Label(box, image=photo, bg=PANEL)
+                lbl.image = photo
+                lbl.pack(padx=10)
+                tk.Label(box, text=h["reason"] + ("" if (h.get("qc") or {}).get("ok", True)
+                                                  else "\n⚠ " + ", ".join(h["qc"]["problems"])),
+                         bg=PANEL, fg=MUTED, wraplength=photo.width(), justify="left",
+                         font=("Segoe UI", 9)).pack(padx=10, pady=4, anchor="w")
+                btns = tk.Frame(box, bg=PANEL)
+                btns.pack(fill="x", padx=10, pady=(0, 10))
+
+                def play():
+                    p = self._clip_file(h)
+                    if p:
+                        try:
+                            os.startfile(p)
+                        except Exception:
+                            webbrowser.open(p)
+
+                def rate(good):
+                    self.rate(good, iids=(str(i),))
+                    win.destroy()
+                for txt, cmd in (("▶ Abspielen", play), ("👍", lambda: rate(True)), ("👎", lambda: rate(False))):
+                    tk.Button(btns, text=txt, command=cmd, bg=FIELD, fg=TEXT, bd=0, padx=10, pady=4,
+                              activebackground=ACCENT, activeforeground="white").pack(side="left", padx=(0, 6))
+                win.update_idletasks()
+                w, hgt = win.winfo_width(), win.winfo_height()
+                sw, sh = win.winfo_screenwidth(), win.winfo_screenheight()
+                win.geometry(f"+{sw - w - 16}+{sh - hgt - 64}")
+                state = {"hover": False}
+                win.bind("<Enter>", lambda e: state.update(hover=True))
+                win.bind("<Leave>", lambda e: state.update(hover=False))
+
+                def auto_close(left=15):
+                    if not win.winfo_exists():
+                        return
+                    if state["hover"]:
+                        left = 6
+                    if left <= 0:
+                        win.destroy()
+                    else:
+                        win.after(1000, lambda: auto_close(left - 1))
+                auto_close()
+            except Exception as e:
+                self.log(f"⚠ Vorschau-Popup ging nicht: {e}")
+        self._preview_async(h, show)
 
     def _toggle_autostart(self):
         on = bool(self.v_autostart.get())

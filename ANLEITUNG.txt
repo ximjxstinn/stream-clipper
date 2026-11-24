@@ -14,6 +14,12 @@ SO GEHT'S
   4. "Ausgewählte clippen" oder "Alle clippen"
   Oder einfach "Alles automatisch" = analysieren + alle Top-Clips schneiden.
 
+NEU IN 3.2
+  - Vorschau: Clip in der Liste anklicken -> 3 Bilder (Anfang/Mitte/Ende) + "▶ Abspielen".
+  - Live-Popup: Bei jedem neuen LIVE-Clip erscheint unten rechts ein kleines Fenster mit Vorschau,
+    Grund und Knöpfen (▶ Abspielen, 👍, 👎). Verschwindet nach 15 s von selbst (bleibt, solange die
+    Maus drauf ist). Abschaltbar: Haken "Vorschau-Popup bei jedem neuen Live-Clip".
+
 NEU IN 3.1
   - Live-Clipper Empfindlichkeit "Maximal (alles Spannende)" (ist jetzt eingestellt): clippt so viel
     wie möglich – auch wenn nur 2-3 Leute im Chat reagieren und wenn das SPIEL plötzlich laut wird

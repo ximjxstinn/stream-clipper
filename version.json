@@ -1,6 +1,6 @@
 {
-  "version": "3.1",
-  "notes": "Live-Clipper Maximal: clippt alles Spannende (Cops, Crashes, Action) + Fix Permission denied",
+  "version": "3.2",
+  "notes": "Neu: Clip-Vorschau in der Liste + Vorschau-Popup bei jedem Live-Clip",
   "files": [
     "StreamClipper.pyw",
     "clipper_core.py",

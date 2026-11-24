@@ -844,6 +844,23 @@ def check_clip(path, expected_dur, runner, tall=False):
     return not problems, problems, info
 
 
+def make_preview(path, out_png, runner, height=120):
+    """3 Vorschaubilder (Anfang, Mitte, Ende) nebeneinander als PNG."""
+    if os.path.isfile(out_png) and os.path.getmtime(out_png) >= os.path.getmtime(path):
+        return out_png
+    out = []
+    runner.run([tool("ffprobe"), "-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1",
+                path], on_line=out.append)
+    try:
+        dur = max(1.0, float(out[-1]))
+    except Exception:
+        dur = 10.0
+    runner.run([tool("ffmpeg"), "-hide_banner", "-loglevel", "error", "-y", "-ss", f"{dur * 0.1:.2f}", "-i", path,
+                "-vf", f"fps={3 / (dur * 0.85):.4f},scale=-2:{height},tile=3x1:padding=4:color=0x18181b",
+                "-frames:v", "1", out_png], quiet=True)
+    return out_png
+
+
 def _top_messages(msgs, n=4):
     counts = {}
     for m in msgs:
