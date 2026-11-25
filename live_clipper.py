@@ -558,17 +558,33 @@ class VideoReader(threading.Thread):
         self.source = source
         self.input_args = None  # z. B. Bildschirm-Aufnahme (PS Remote Play) statt Twitch
         self.proc = None
+        self.last_frame = time.time()
+        self.frames = 0
+
+    def _watchdog(self):
+        """Twitch-Bild hängt manchmal (Werbung, Netz) – dann ffmpeg neu starten, statt ewig zu warten."""
+        while not self.stop.is_set():
+            self.stop.wait(5)
+            if self.proc and self.proc.poll() is None and time.time() - self.last_frame > 20:
+                self.log("   🎥 Live-Bild hing (keine Bilder seit 20 s) – verbinde neu …")
+                self.last_frame = time.time()
+                self.kill()
 
     def run(self):
         kw = {"creationflags": 0x08000000} if IS_WIN else {}
         first = True
         size = VW * VH * 3
+        if not self.input_args:
+            threading.Thread(target=self._watchdog, daemon=True).start()
         while not self.stop.is_set():
             try:
                 if self.input_args:
                     inp = list(self.input_args() if callable(self.input_args) else self.input_args)
                 else:
-                    inp = ["-i", self.source or _stream_url(self.channel, "160p/160p30/360p/worst[vcodec!=none]/worst")]
+                    url = self.source or _stream_url(self.channel, "160p/160p30/360p/worst[vcodec!=none]/worst")
+                    inp = (["-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5", "-i", url]
+                           if url.startswith("http") else ["-i", url])
+                    self.last_frame = time.time()
                 self.proc = subprocess.Popen(
                     [core.tool("ffmpeg"), "-hide_banner", "-loglevel", "error", "-nostats", *inp, "-an",
                      "-vf", f"fps=4,scale={VW}:{VH}", "-pix_fmt", "rgb24", "-f", "rawvideo", "-"],
@@ -579,8 +595,10 @@ class VideoReader(threading.Thread):
                     if not raw or len(raw) < size:
                         break
                     if first:
-                        self.log("   🎥 Live-Bild verbunden – erkenne Action und Blaulicht")
+                        self.log("   🎥 Live-Bild verbunden – erkenne Cops, Explosionen, Action und Blaulicht")
                         first = False
+                    self.last_frame = time.time()
+                    self.frames += 1
                     motion, red, blue, prev = analyze_video_frame(raw, prev)
                     now_t = time.time()
                     self.on_frame(now_t, motion, red, blue)
@@ -594,7 +612,7 @@ class VideoReader(threading.Thread):
             except Exception as e:
                 if not self.stop.is_set():
                     self.log(f"   ⚠ Live-Bild nicht verfügbar ({str(e)[:100]}) – versuche es gleich nochmal …")
-            self.stop.wait(20)
+            self.stop.wait(3 if not self.source else 20)
 
     def kill(self):
         p = self.proc
@@ -1239,6 +1257,14 @@ class LiveClipper:
         self.on_end = lambda stream: None
         self.state_prefix = "🔴 LIVE"
 
+    def _frames_note(self):
+        vr = getattr(self, "vr", None)
+        if not vr or vr.input_args:
+            return ""
+        n = vr.frames - getattr(self, "_frames_last", 0)
+        self._frames_last = vr.frames
+        return f" · Bilder {n}/Min" + (" ⚠ KEIN BILD" if n < 60 else "")
+
     def running(self):
         return self.thread is not None and self.thread.is_alive()
 
@@ -1298,6 +1324,7 @@ class LiveClipper:
         ar.start()
         vr = VideoReader(channel, det.add_frame, self.stream_stop, self.log)
         vr.on_scene = det.add_scene
+        self.vr = vr
         vr.start()
         self.log("   💬 lese Chat mit · 🎧 verbinde Live-Ton · 🎥 verbinde Live-Bild …")
         threading.Thread(target=self._detect, args=(det, uid), daemon=True).start()
@@ -1335,7 +1362,8 @@ class LiveClipper:
                          f"Sirene {f2(pk.get('siren'))} (ab 1) · Blaulicht {f2(pk.get('blue'))} (ab 1) · "
                          f"Bild ×{f2(pk.get('vis'))} (ab ×{det.t_vis}) · Schüsse {pk.get('shots') or 0} (ab {det.min_shots})"
                          + (" · 💥 Explosion" if pk.get("boom") else "")
-                         + (f" · 🚔 Cops {pk['cops']} s" if pk.get("cops") else ""))
+                         + (f" · 🚔 Cops {pk['cops']} s" if pk.get("cops") else "")
+                         + self._frames_note())
                 det.peak = {"u": 0, "kw": 0, "voice": None, "action": None, "siren": None, "blue": None,
                             "vis": None}
             if not trig:

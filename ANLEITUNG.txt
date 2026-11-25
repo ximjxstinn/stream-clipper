@@ -14,6 +14,11 @@ SO GEHT'S
   4. "Ausgewählte clippen" oder "Alle clippen"
   Oder einfach "Alles automatisch" = analysieren + alle Top-Clips schneiden.
 
+NEU IN 4.8.1 – FIX: LIVE-BILD HING
+  - Das Twitch-Bild blieb manchmal nach ~1 Minute hängen (z. B. bei Werbung) → keine Cops/Explosionen erkannt,
+    Auto-Profil blieb auf Normal. Jetzt: hängt das Bild 20 s, verbindet die App automatisch neu.
+  - Im Log steht pro Minute „Bilder N/Min“ (normal ~240); bei Problemen „⚠ KEIN BILD“.
+
 NEU IN 4.8 – 🧪 LIVE-CLIPPER TESTEN
   - Button „🧪 Live-Clipper testen (mit einem Video) …“: spielt einen geladenen Stream oder ein Video im
     Schnelldurchlauf ab, als wärst du live (gleiche Erkennung, dein Profil/Auto-Profil).

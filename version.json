@@ -1,6 +1,6 @@
 {
-  "version": "4.8",
-  "notes": "Testknopf: Live-Clipper mit einem Video im Schnelldurchlauf testen",
+  "version": "4.8.1",
+  "notes": "Fix: Live-Bild hing nach kurzer Zeit – verbindet jetzt automatisch neu",
   "files": [
     "StreamClipper.pyw",
     "clipper_core.py",
