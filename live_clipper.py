@@ -627,6 +627,188 @@ def auto_mode(det, now):
     return "normal"
 
 
+def apply_settings(det, st, now):
+    """Einstellungen (oder das Auto-Profil) auf den Detektor anwenden. Gibt den Auto-Modus zurück (oder None)."""
+    v = st.get("live_voice")
+    if v is not None:
+        det.t_voice = float(v) if float(v) > 0 else 999.0
+    det.enabled = {k: True for k in TRIGGERS}
+    det.enabled.update(st.get("live_trig") or {})
+    det.t_action = float(st.get("live_game", det.t_action))
+    det.t_vis = float(st.get("live_vis", det.t_vis))
+    det.cooldown = max(20, int(st.get("live_gap", det.cooldown)))
+    det.max_per_hour = max(1, int(st.get("live_hour", 999)))
+    det.min_shots = max(2, int(st.get("live_shots", 4)))
+    det.max_chase = max(1, int(st.get("live_chase", 3)))
+    sens = SENSITIVITY.get(st.get("live_sens", "Mittel"), SENSITIVITY["Mittel"])
+    det.t_chat, det.min_people = sens[0], sens[3]
+    mode = None
+    if st.get("live_autoprof"):
+        mode = auto_mode(det, now)
+        trigs, gap, hour, shots_n, chase = AUTO_MODES[mode]
+        det.enabled = {k: (k in trigs) for k in TRIGGERS}
+        det.cooldown, det.max_per_hour, det.min_shots, det.max_chase = gap, hour, shots_n, chase
+    if not st.get("vis", True):
+        det.enabled["vision"] = det.enabled["bluelight"] = False
+    return mode
+
+
+# --------------------------------------------------------------------------- #
+#  🧪 Test: ein Video im Schnelldurchlauf so behandeln, als wärst du live
+# --------------------------------------------------------------------------- #
+def test_replay(media, st, log, check=lambda: None, progress=lambda pc: None):
+    """Spielt ein Video im Schnelldurchlauf durch den Live-Clipper (gleiche Erkennung, gleiches Auto-Profil).
+    Macht KEINE Clips und lädt nichts hoch. Gibt [(sekunde, art, grund)] und [(sekunde, modus)] zurück."""
+    import numpy as np
+    kw = {"creationflags": 0x08000000} if IS_WIN else {}
+    ff = core.tool("ffmpeg")
+    # Ton: 3 Kanäle aus ffmpeg – gesamt, Hochpass (Stimme), Tiefpass (Bass)
+    ap = subprocess.Popen([ff, "-v", "error", "-i", media, "-vn", "-filter_complex",
+                           "[0:a]aresample=8000,pan=mono|c0=0.5*c0+0.5*c1,asplit=3[f][h][l];"
+                           "[h]highpass=f=250:p=1[hp];[l]lowpass=f=150,lowpass=f=150[lp];"
+                           "[f][hp][lp]amerge=inputs=3[out]", "-map", "[out]", "-ac", "3",
+                           "-f", "s16le", "-"], stdout=subprocess.PIPE, stdin=subprocess.DEVNULL,
+                          stderr=subprocess.DEVNULL, **kw)
+    vp = subprocess.Popen([ff, "-v", "error", "-i", media, "-an", "-vf", f"fps=4,scale={VW}:{VH}",
+                           "-pix_fmt", "rgb24", "-f", "rawvideo", "-"], stdout=subprocess.PIPE,
+                          stdin=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **kw)
+    dur = 0.0
+    try:
+        out = []
+        core.Runner(lambda *_: None).run([core.tool("ffprobe"), "-v", "error", "-show_entries", "format=duration",
+                                          "-of", "csv=p=0", media], on_line=out.append)
+        dur = float(out[0])
+    except Exception:
+        pass
+    det = Detector(st.get("channel", "x"), st.get("keywords", core.DEFAULT_KEYWORDS),
+                   st.get("live_sens", "Mittel"), cooldown=60, warmup=120)
+    T0 = 1_000_000.0
+    det.start = T0
+    freqs = np.array([f for f, _ in _GOERTZEL])
+    E = np.exp(-2j * np.pi * np.outer(freqs, np.arange(SIREN_N)) / SR)
+    x0, x1 = int(core.MM_BOX[0] * VW), int(core.MM_BOX[1] * VW)
+    y0, y1 = int(core.MM_BOX[2] * VH), int(core.MM_BOX[3] * VH)
+    tr = [[-90.0, -90.0, -90.0], 99, None]
+    prev_gray = None
+    fsz = VW * VH * 3
+    vbuf = b""
+    vi = 0
+    k = 0
+    trigs, modes = [], []
+    last_mode = None
+    db = lambda e: np.where(e > 1e-12, 10 * np.log10(np.maximum(e, 1e-30)), -90.0)
+    CH = 600  # 60 s Ton pro Schritt
+    last_pc = -10
+    try:
+        while True:
+            check()
+            raw = ap.stdout.read(CH * FRAME * 3 * 2)
+            if not raw:
+                break
+            a = np.frombuffer(raw[:len(raw) // 6 * 6], dtype="<i2").astype(np.float64).reshape(-1, 3) / 32768.0
+            nb = len(a) // FRAME
+            if nb == 0:
+                break
+            a = a[:nb * FRAME]
+            full, hp, lp = (a[:, c].reshape(nb, FRAME) for c in range(3))
+            e_full = (full ** 2).mean(1)
+            game = db(e_full)
+            voice = db((hp ** 2).mean(1))
+            sub = np.where(e_full > 1e-12, 10 * np.log10(np.maximum(e_full, 1e-30) /
+                                                         np.maximum((lp ** 2).mean(1), 1e-12)), 99.0)
+            mid = full[:, FRAME // 2 - SIREN_N // 2:FRAME // 2 + SIREN_N // 2]
+            P = np.abs(mid @ E.T) ** 2
+            tot = (mid ** 2).sum(1)
+            ratio = np.where(tot > 1e-9, np.minimum(1.0, P.max(1) / (SIREN_N / 2.0 * np.maximum(tot, 1e-30))), 0.0)
+            tf = np.where(tot > 1e-9, freqs[P.argmax(1)], 0)
+            env = db((full.reshape(-1, TR_N) ** 2).mean(1)).tolist()
+            hits = [0] * nb
+            prev, since, pend = tr
+            for i, e in enumerate(env):
+                since += 1
+                if pend is not None:
+                    pk_, age = pend
+                    pk_ = max(pk_, e) if age < 2 else pk_
+                    age += 1
+                    if e <= pk_ - 8:
+                        hits[i // (FRAME // TR_N)] += 1
+                        pend = None
+                    elif age > 8:
+                        pend = None
+                    else:
+                        pend = (pk_, age)
+                if pend is None and e > -45 and e - min(prev) >= 10 and since >= 5:
+                    pend = (e, 0)
+                    since = 0
+                prev = prev[1:] + [e]
+            tr = [prev, since, pend]
+            vs = []
+            for j in range(nb):
+                t = T0 + k * 0.1
+                det.add_db(t, float(game[j]), "game")
+                det.add_db(t, float(game[j] - voice[j]), "low")
+                det.add_db(t, int(hits[j]), "hits")
+                det.add_db(t, float(sub[j]), "sub")
+                det.add_tone(t, int(tf[j]) or None, float(ratio[j]))
+                vs.append(float(voice[j]))
+                if k % 10 == 9:
+                    det.add_db(t, max(vs), "voice")
+                    vs = []
+                # Bilder bis zu dieser Zeit
+                while vi * 0.25 <= k * 0.1:
+                    need = fsz - len(vbuf)
+                    if need > 0:
+                        chunk = vp.stdout.read(max(need, fsz * 40))
+                        if not chunk:
+                            break
+                        vbuf += chunk
+                        if len(vbuf) < fsz:
+                            break
+                    fr = np.frombuffer(vbuf[:fsz], dtype=np.uint8).reshape(VH, VW, 3).astype(np.int32)
+                    vbuf = vbuf[fsz:]
+                    r, g, b = fr[..., 0], fr[..., 1], fr[..., 2]
+                    y = (r * 77 + g * 150 + b * 29) >> 8
+                    red_m = (r > 170) & (g < 90) & (b < 110) & (r - np.maximum(g, b) > 90)
+                    blue_m = ~red_m & (b > 170) & (r < 110) & (b - np.maximum(r, g) > 70)
+                    motion = float(np.abs(y - prev_gray).mean()) if prev_gray is not None else 0.0
+                    prev_gray = y
+                    tv = T0 + vi * 0.25
+                    det.add_frame(tv, motion, float(red_m.mean()), float(blue_m.mean()))
+                    mm = fr[y0:y1, x0:x1].reshape(-1, 3)
+                    mr, mg, mb = mm[:, 0], mm[:, 1], mm[:, 2]
+                    mred = float(((mr > 90) & (mr - np.maximum(mg, mb) > 40)).mean())
+                    mblue = float(((mb > 110) & (mb - np.maximum(mr, mg) > 40)).mean())
+                    sm = fr[2::8, 4::8].reshape(-1, 3)
+                    sr_, sg_, sb_ = sm[:, 0].mean(), sm[:, 1].mean(), sm[:, 2].mean()
+                    look = ((sr_ * 77 + sg_ * 150 + sb_ * 29) / 256, sr_ - sb_,
+                            float((sm.max(1) - sm.min(1)).mean()), float((sm.min(1) > 200).mean()))
+                    det.add_scene(tv, mred, mblue, look)
+                    vi += 1
+                if k % 10 == 0:
+                    mode = apply_settings(det, st, t)
+                    if mode and mode != last_mode:
+                        last_mode = mode
+                        modes.append((k // 10, mode))
+                        log(f"   {core.fmt_time(k // 10)}  🤖 → {AUTO_NAMES[mode]}")
+                    x = det.tick(t)
+                    if x:
+                        trigs.append((k // 10, x["kind"], x["reason"]))
+                        log(f"   {core.fmt_time(k // 10)}  ✂ würde clippen: {x['reason']}")
+                k += 1
+            if dur:
+                pc = int(k / 10 / dur * 100)
+                if pc >= last_pc + 10:
+                    last_pc = pc
+                    progress(min(pc, 100))
+    finally:
+        for p_ in (ap, vp):
+            try:
+                p_.kill()
+            except Exception:
+                pass
+    return trigs, modes, k / 10.0
+
+
 # --------------------------------------------------------------------------- #
 #  Spannungs-Check: fertigen Clip anschauen + anhören und 0–100 Punkte geben
 # --------------------------------------------------------------------------- #
@@ -1137,32 +1319,11 @@ class LiveClipper:
         next_report = time.time() + 60
         while stop and not stop.is_set():
             stop.wait(1)
-            # Stimm-Schwelle live aus den Einstellungen (0 = Stimme zählt gar nicht)
-            v = self.st.get("live_voice")
-            if v is not None:
-                det.t_voice = float(v) if float(v) > 0 else 999.0
-            det.enabled = {k: True for k in TRIGGERS}
-            det.enabled.update(self.st.get("live_trig") or {})
-            det.t_action = float(self.st.get("live_game", det.t_action))
-            det.t_vis = float(self.st.get("live_vis", det.t_vis))
-            det.cooldown = max(20, int(self.st.get("live_gap", det.cooldown)))
-            det.max_per_hour = max(1, int(self.st.get("live_hour", 999)))
-            det.min_shots = max(2, int(self.st.get("live_shots", 4)))
-            det.max_chase = max(1, int(self.st.get("live_chase", 3)))
-            # „Modus“ + „Szenen-Erkennung im Bild“ aus dem Hauptfenster gelten auch live
-            sens = SENSITIVITY.get(self.st.get("live_sens", "Mittel"), SENSITIVITY["Mittel"])
-            det.t_chat, det.min_people = sens[0], sens[3]
-            if self.st.get("live_autoprof"):
-                mode = auto_mode(det, time.time())
-                trigs, gap, hour, shots_n, chase = AUTO_MODES[mode]
-                det.enabled = {k: (k in trigs) for k in TRIGGERS}
-                det.cooldown, det.max_per_hour, det.min_shots, det.max_chase = gap, hour, shots_n, chase
-                if mode != getattr(self, "_auto_mode", None):
-                    self._auto_mode = mode
-                    self.log(f"🤖 Auto-Profil: {AUTO_NAMES[mode]}")
-                    self.on_state(f"{self.state_prefix} – {self.count} Clips · {AUTO_NAMES[mode].split(' (')[0]}")
-            if not self.st.get("vis", True):
-                det.enabled["vision"] = det.enabled["bluelight"] = False
+            mode = apply_settings(det, self.st, time.time())
+            if mode and mode != getattr(self, "_auto_mode", None):
+                self._auto_mode = mode
+                self.log(f"🤖 Auto-Profil: {AUTO_NAMES[mode]}")
+                self.on_state(f"{self.state_prefix} – {self.count} Clips · {AUTO_NAMES[mode].split(' (')[0]}")
             trig = det.tick(time.time())
             if time.time() >= next_report:
                 next_report = time.time() + 60

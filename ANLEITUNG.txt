@@ -14,6 +14,13 @@ SO GEHT'S
   4. "Ausgewählte clippen" oder "Alle clippen"
   Oder einfach "Alles automatisch" = analysieren + alle Top-Clips schneiden.
 
+NEU IN 4.8 – 🧪 LIVE-CLIPPER TESTEN
+  - Button „🧪 Live-Clipper testen (mit einem Video) …“: spielt einen geladenen Stream oder ein Video im
+    Schnelldurchlauf ab, als wärst du live (gleiche Erkennung, dein Profil/Auto-Profil).
+    Ein 2,5-Stunden-Stream dauert ca. 2–3 Minuten.
+  - Im Log: wann das Auto-Profil umschaltet und wo geclippt würde. Danach stehen die Stellen in der Liste
+    (ansehen oder echte Clips daraus machen). Es wird nichts automatisch geclippt oder hochgeladen.
+
 NEU IN 4.7 – PS REMOTE PLAY OHNE OBS + CAPTURE-KARTE
   - „🎮 Auch ohne Stream clippen (PS Remote Play)“ braucht kein OBS mehr: Die App nimmt das Remote-Play-Fenster
     selbst auf (immer die letzten ~2 Min.) und den Ton von deinem PC (Lautsprecher/Headset – also auch Discord,

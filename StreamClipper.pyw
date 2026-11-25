@@ -34,7 +34,7 @@ except ImportError:  # ältere Updater kennen live_clipper.py noch nicht → sel
     except Exception:
         live_clipper = None
 
-VERSION = "4.7"
+VERSION = "4.8"
 
 # Fertige Live-Profile für GTA 6 (jederzeit umschaltbar, gilt sofort – auch mitten im Stream)
 _ALL = ("cops", "siren", "shots", "explosion", "bluelight", "vision", "game", "voice", "chat", "clipreq")
@@ -474,6 +474,9 @@ class App:
         self.cb_live_profile.grid(row=r, column=1, columnspan=2, sticky="we", pady=2)
         self.cb_live_profile.bind("<<ComboboxSelected>>", lambda e: self.apply_live_profile(self.v_live_profile.get()))
         r += 1
+        ttk.Button(left, text="🧪 Live-Clipper testen (mit einem Video) …", command=self.live_test).grid(
+            row=r, column=0, columnspan=3, sticky="we", pady=(4, 0))
+        r += 1
         ttk.Button(left, text="⚙ Live-Auslöser einstellen (was & wie oft) …", command=self.live_trigger_settings).grid(
             row=r, column=0, columnspan=3, sticky="we", pady=(4, 2))
         r += 1
@@ -859,6 +862,76 @@ class App:
                     self.ui(lambda: status.set("❌ fehlgeschlagen – siehe Log"))
             threading.Thread(target=job, daemon=True).start()
         ttk.Button(f, text="Verbinden", style="Accent.TButton", command=go).pack(anchor="e")
+
+    # ------------------------------------------------------------------ 🧪 Live-Clipper testen --
+    def live_test(self):
+        if self.busy:
+            messagebox.showinfo("Live-Test", "Warte, bis die App mit der aktuellen Aufgabe fertig ist.")
+            return
+        if not live_clipper or not hasattr(live_clipper, "test_replay"):
+            self.log("❌ live_clipper.py zu alt – bitte „Nach Updates suchen“.")
+            return
+        src = None
+        media = None
+        meta = self.meta or {}
+        if meta.get("kind") == "vod" and meta.get("id"):
+            low = os.path.join(core.WORK_DIR, str(meta["id"]))
+            cand = [os.path.join(low, f) for f in os.listdir(low)] if os.path.isdir(low) else []
+            cand = [c for c in cand if os.path.basename(c).startswith("lowres.")]
+            if cand and messagebox.askyesno(
+                    "Live-Test", f"Den geladenen Stream testen?\n\n„{meta.get('title', '')}“\n\n"
+                                 "(Nein = ein anderes Video auswählen)"):
+                src, media = dict(meta), cand[0]
+        if not media:
+            media = filedialog.askopenfilename(
+                title="Video für den Live-Test", filetypes=[("Videos", " ".join("*" + e for e in VIDEO_EXTS))])
+            if not media:
+                return
+            src = {"kind": "file", "path": media, "title": os.path.splitext(os.path.basename(media))[0]}
+        st = self.settings()
+        self.log("🧪 LIVE-TEST: Ich spiele das Video im Schnelldurchlauf ab, als wärst du live – mit deinen "
+                 "Live-Einstellungen. Es werden KEINE Clips gemacht und nichts hochgeladen.")
+        prof = self.s.get("live_profile") or "✏ Eigene Einstellungen"
+        self.log(f"   Profil: {prof}")
+        self._work(self._live_test_job, src, media, self._live_settings())
+
+    def _live_test_job(self, src, media, st):
+        core.ensure_tools(self.log, self.runner)
+        try:
+            import numpy  # noqa: F401
+        except Exception:
+            self.log("   Installiere einmalig numpy für den Schnelltest …")
+            self._pip("numpy")
+        t0 = time.time()
+        trigs, modes, secs = live_clipper.test_replay(
+            media, st, self.log, check=self.runner.check,
+            progress=lambda pc: self.log(f"   🧪 … {pc}%"))
+        kinds = {}
+        for _, kd, _ in trigs:
+            kinds[kd] = kinds.get(kd, 0) + 1
+        names = {"cops": "🚔 Cops", "explosion": "💥 Explosion", "shots": "🔫 Schüsse", "siren": "🚨 Sirene",
+                 "bluelight": "🚨 Blaulicht", "vision": "🎬 Bild", "game": "🎮 Spiel lauter", "voice": "🗣 Stimme",
+                 "chat": "💬 Chat", "clip": "✂ !clip"}
+        self.log(f"🧪 Test fertig ({core.fmt_time(secs)} Video in {time.time() - t0:.0f} s): "
+                 f"{len(trigs)} Clips würden entstehen – " +
+                 (", ".join(f"{names.get(k, k)} {v}×" for k, v in sorted(kinds.items(), key=lambda x: -x[1]))
+                  or "keine"))
+        if modes:
+            per = {}
+            for i, (sec, m) in enumerate(modes):
+                end = modes[i + 1][0] if i + 1 < len(modes) else secs
+                per[m] = per.get(m, 0) + (end - sec)
+            self.log("   Zeit pro Modus: " + " · ".join(
+                f"{live_clipper.AUTO_NAMES[m].split(' (')[0]} {core.fmt_time(v)}" for m, v in per.items()))
+        clip_len = int(st.get("live_len", 30))
+        hl = [{"time": float(sec), "start": max(0.0, sec - clip_len + 5.0), "end": float(sec) + 5.0,
+               "score": 100, "reason": "🧪 TEST · " + reason, "chat": [], "features": [0, 0, 0, 0]}
+              for sec, _, reason in trigs]
+        if hl:
+            self.ui(lambda: self._show(src, hl, []))
+            self.log("   Die Stellen stehen jetzt in der Liste – mit „▶ Ansehen“ prüfen, mit „✂ Ausgewählte "
+                     "clippen“ echte Clips daraus machen.")
+        return src, hl
 
     def _profile_names(self):
         return list(GTA_PROFILES) + list(self.s.get("live_profiles") or {}) + [CUSTOM_PROFILE]

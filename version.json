@@ -1,6 +1,6 @@
 {
-  "version": "4.7",
-  "notes": "PS Remote Play ohne OBS (App nimmt selbst auf) + Capture-Karte über OBS",
+  "version": "4.8",
+  "notes": "Testknopf: Live-Clipper mit einem Video im Schnelldurchlauf testen",
   "files": [
     "StreamClipper.pyw",
     "clipper_core.py",
