@@ -690,6 +690,9 @@ AUTO_NAMES = {"action": "💰 Action-Modus (Cops/Explosionen gerade eben)",
               "raub": "💰🔫 Raub-Modus (Waffe gezogen / !raub – clippt jede Action, auch ohne Cops)"}
 
 
+ARMED_ON = 0.30  # Anteil der letzten 30 s mit sichtbarer Munitions-Anzeige → Kampf/Raub
+
+
 def fight_on(det, now):
     """Automatischer Raub-Modus: Waffe ist (fast) die ganze letzte halbe Minute gezogen."""
     return getattr(det, "auto_raub", True) and now - getattr(det, "fight_seen", 0) < 60
@@ -1250,7 +1253,7 @@ class Detector:
                 self.boom_seen = now
         # 🔫 Waffe gezogen (Munitions-Anzeige) über längere Zeit = Kampf/Raub – auch ganz ohne Cops
         armed = self.armed_frac(now)
-        if armed >= 0.45:
+        if armed >= ARMED_ON:
             if now - self.fight_seen > 90:
                 self.fight_since = now
             self.fight_seen = now
@@ -1264,6 +1267,12 @@ class Detector:
         # Sirene nur, wenn wirklich was los ist (Cops/Blaulicht/Bewegung) – nicht eine Sirene irgendwo in der Stadt
         if siren and not (cops_ctx or (blue or 0) >= 1.0 or (vis or 0) >= 1.6):
             siren = None
+        # Echte Schießerei (mehrere Schüsse mit Action drumherum) = auch Kampf → Raub-Modus, ohne auf die
+        # Munitions-Anzeige zu warten
+        if shots >= 3 and self.auto_raub:
+            if now - self.fight_seen > 90:
+                self.fight_since = now
+            self.fight_seen = now
         # Messwerte fürs Log (Maximum pro Minute)
         pk = self.peak
         if police:
@@ -1502,7 +1511,7 @@ class LiveClipper:
                          f"Bild ×{f2(pk.get('vis'))} (ab ×{det.t_vis}) · Schüsse {pk.get('shots') or 0} (ab {det.min_shots})"
                          + (" · 💥 Explosion" if pk.get("boom") else "")
                          + (f" · 🚔 Cops {pk['cops']} s" if pk.get("cops") else "")
-                         + f" · 🔫 Waffe {int(100 * (pk.get('armed') or 0))} % (ab 45 %)"
+                         + f" · 🔫 Waffe {int(100 * (pk.get('armed') or 0))} % (ab {int(ARMED_ON * 100)} %)"
                          + self._frames_note())
                 det.peak = {"u": 0, "kw": 0, "voice": None, "action": None, "siren": None, "blue": None,
                             "vis": None}

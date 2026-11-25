@@ -503,6 +503,15 @@ def ammo_hud(crop):
             continue  # Lücke zwischen Magazin und Reserve
         if mx[r:r + 3, 34:59][~band].mean() > 110:
             continue
+        bcols = np.where(band.any(0))[0] + 34
+        if r >= 2:
+            up2 = mx[r - 2:r, bcols].max(0)
+            if (up2 > 90).mean() > 0.4:
+                continue  # Helles läuft nach oben weiter = Gitter/Stäbe/Muster im Bild, keine Zahlen
+        if r + 5 <= HUD_H:
+            dn = mx[r + 3:r + 5, bcols].max(0)
+            if (dn > 90).mean() > 0.7:
+                continue  # läuft auch nach unten durch (Waffen-Symbol ist schmaler)
         win = fr[max(0, r - 1):r + 4, 34 + L:34 + R + 1]
         if ((win[..., 0] > 100) & (win[..., 0] - np.maximum(win[..., 1], win[..., 2]) > 50)).sum() >= 3:
             continue  # rot-weiße Status-Symbole (Fahndung o. ä.), keine Zahlen

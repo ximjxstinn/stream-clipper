@@ -1,6 +1,6 @@
 {
-  "version": "5.2",
-  "notes": "TikTok: 5-Entwürfe-Limit beachten, wartende Clips automatisch nachladen (beste zuerst) + Vice-City-Edit",
+  "version": "5.3",
+  "notes": "Raub-Modus schaltet schneller um (Waffe ab 30 % oder mehrere Schüsse)",
   "files": [
     "StreamClipper.pyw",
     "clipper_core.py",
