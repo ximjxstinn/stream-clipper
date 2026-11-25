@@ -1283,19 +1283,36 @@ def make_vertical(src, out_path, style, runner, edit=None, reason="", log=None):
                 "-filter_complex", VERTICAL_FILTERS.get(style, VERTICAL_FILTERS["blur"]),
                 "-map", "[v]", "-map", "0:a?", "-c:v", "libx264", "-preset", "veryfast", "-crf", "21",
                 "-r", "30", "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", out_path], quiet=True)
-    if edit and edit.get("vc_on") and (edit.get("vc_tt", True) or edit.get("vc_yt", True)):
-        make_vc(out_path, edit, runner, reason, log)
+    if edit and edit.get("vc_on"):
+        done = set()
+        for plat in ("yt", "tt"):
+            if edit.get("vc_" + plat, True) and vc_path(out_path, plat, edit) not in done:
+                done.add(vc_path(out_path, plat, edit))
+                make_vc(out_path, edit, runner, reason, log, plat)
     return out_path
 
 
-def vc_path(path):
-    """Datei mit Vice-City-Edit neben dem normalen Clip."""
-    return os.path.splitext(path)[0] + "_vc.mp4"
+def vc_path(path, plat="yt", edit=None):
+    """Datei mit Vice-City-Edit neben dem normalen Clip. TikTok bekommt (ohne Haken) eine Version ohne Musik,
+    weil NCS-Musik nur für YouTube/Twitch freigegeben ist – auf TikTok nimmst du TikToks eigene Sounds."""
+    edit = edit or {}
+    nomusic = plat == "tt" and edit.get("vc_music") and not edit.get("vc_music_tt", False)
+    return os.path.splitext(path)[0] + ("_vc-tt.mp4" if nomusic else "_vc.mp4")
 
 
-def make_vc(path, edit, runner, reason="", log=None):
+def vc_credit(vc_file):
+    try:
+        with open(vc_file + ".json", encoding="utf-8") as f:
+            return json.load(f).get("credit", "")
+    except (OSError, ValueError):
+        return ""
+
+
+def make_vc(path, edit, runner, reason="", log=None, plat="yt"):
     """Vice-City-Version neben den Clip legen (…_vc.mp4). Der normale Clip bleibt. Gibt den Pfad oder None."""
-    tmp = vc_path(path)
+    tmp = vc_path(path, plat, edit)
+    if plat == "tt" and tmp.endswith("_vc-tt.mp4"):
+        edit = dict(edit, vc_music="")
     try:
         vicecity_edit(path, tmp, edit, runner, reason, edit.get("channel") or "ximjxstinn", log)
         if os.path.isfile(tmp) and os.path.getsize(tmp) > 10000:
@@ -1316,11 +1333,11 @@ def upload_file(path, plat, edit, runner=None, reason="", log=None):
     """Welche Datei geht zu TikTok/YouTube: mit Vice-City-Edit, wenn für die Plattform eingeschaltet."""
     if not path or not edit or not edit.get("vc_on") or not edit.get("vc_" + plat, True):
         return path
-    vp = vc_path(path)
+    vp = vc_path(path, plat, edit)
     if os.path.isfile(vp):
         return vp
     if runner is not None:
-        return make_vc(path, edit, runner, reason, log) or path
+        return make_vc(path, edit, runner, reason, log, plat) or path
     return path
 
 
@@ -1350,7 +1367,8 @@ def safe_name(text, maxlen=40):
 # --------------------------------------------------------------------------- #
 #  🌴 Vice-City-Edit für TikTok: Neon-Look, Autocut-Zooms, Titel, Musik
 # --------------------------------------------------------------------------- #
-VC_DEFAULTS = {"vc_tt": True, "vc_yt": True, "vc_on": False, "vc_look": True, "vc_cut": True, "vc_title": True, "vc_music": "",
+VC_DEFAULTS = {"vc_font": "Impact", "vc_font_file": "", "vc_music_tt": False,
+               "vc_tt": True, "vc_yt": True, "vc_on": False, "vc_look": True, "vc_cut": True, "vc_title": True, "vc_music": "",
                "vc_vol": 30, "vc_twitch": True}
 MUSIC_EXT = (".mp3", ".m4a", ".wav", ".ogg", ".aac", ".flac")
 
@@ -1420,12 +1438,68 @@ def _ff_esc(path):
     return path.replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
 
 
-def _font():
-    for f in ("C:/Windows/Fonts/segoescb.ttf", "C:/Windows/Fonts/impact.ttf", "C:/Windows/Fonts/arialbd.ttf",
+# Schriften für den Titel: Name → mögliche Dateinamen (Windows-Fonts bzw. selbst installierte)
+VC_FONTS = {
+    "Impact": ["impact.ttf"],
+    "Pricedown (GTA-Schrift)": ["pricedown bl.ttf", "pricedown.ttf", "pricedown bl.otf", "pricedown.otf"],
+    "Arial Black": ["ariblk.ttf"],
+    "Bahnschrift (modern)": ["bahnschrift.ttf"],
+    "Segoe Script (Schreibschrift)": ["segoescb.ttf", "segoesc.ttf"],
+    "Segoe UI Black": ["seguibl.ttf"],
+    "Eigene Schrift (.ttf/.otf) …": [],
+}
+
+
+def _font_dirs():
+    dirs = ["C:/Windows/Fonts"]
+    la = os.environ.get("LOCALAPPDATA")
+    if la:
+        dirs.append(os.path.join(la, "Microsoft", "Windows", "Fonts"))
+    return dirs
+
+
+def font_file(name, custom=""):
+    """Pfad zur Schrift-Datei oder None."""
+    if custom and os.path.isfile(custom) and (name or "").startswith("Eigene"):
+        return custom
+    for fn in VC_FONTS.get(name or "", []):
+        for d in _font_dirs():
+            for cand in (os.path.join(d, fn), os.path.join(d, fn.upper()), os.path.join(d, fn.title())):
+                if os.path.isfile(cand):
+                    return cand
+            try:  # Groß/klein egal
+                for f in os.listdir(d):
+                    if f.lower() == fn.lower():
+                        return os.path.join(d, f)
+            except OSError:
+                pass
+    return None
+
+
+def _font(opts=None):
+    opts = opts or {}
+    f = font_file(opts.get("vc_font", "Impact"), opts.get("vc_font_file", ""))
+    if f:
+        return f
+    for f in ("C:/Windows/Fonts/impact.ttf", "C:/Windows/Fonts/arialbd.ttf",
               "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"):
         if os.path.isfile(f):
             return f
     return None
+
+
+def music_credit(path):
+    """Credit-Zeile für die Beschreibung aus dem Dateinamen, z. B. „Artist - Title [NCS Release].mp3“."""
+    if not path:
+        return ""
+    name = os.path.splitext(os.path.basename(path))[0]
+    name = re.sub(r"\s*\[(NCS[^\]]*)\]\s*", " ", name).strip(" -_")
+    name = name.replace("_", " ")
+    ncs = "ncs" in path.lower()
+    if ncs:
+        return (f"🎵 Musik: {name} [NCS Release]\nMusic provided by NoCopyrightSounds\n"
+                "Free Download/Stream: https://ncs.io · Watch: https://www.youtube.com/NoCopyrightSounds")
+    return f"🎵 Musik: {name}"
 
 
 def vicecity_edit(src, out_path, opts, runner, reason="", channel="ximjxstinn", log=None):
@@ -1457,7 +1531,7 @@ def vicecity_edit(src, out_path, opts, runner, reason="", channel="ximjxstinn", 
     if moments and opts.get("vc_look", True):
         flash = "+".join(f"0.22*max(0,1-abs(t-{m:.2f})/0.08)" for m in moments[:3])
         vf.append(f"eq=brightness='{flash}':eval=frame")
-    font = _font()
+    font = _font(opts)
     tmp_txt = []
     if font and opts.get("vc_title", True):
         title = vc_title_for(reason)
@@ -1500,6 +1574,11 @@ def vicecity_edit(src, out_path, opts, runner, reason="", channel="ximjxstinn", 
                 os.remove(f)
             except OSError:
                 pass
+    try:  # welcher Song drin ist → für die Credit-Zeile in der Beschreibung (NCS verlangt das)
+        with open(out_path + ".json", "w", encoding="utf-8") as f:
+            json.dump({"music": music or "", "credit": music_credit(music)}, f, ensure_ascii=False)
+    except OSError:
+        pass
     if log:
         log(f"   🌴 Vice-City-Edit: {len(moments)} Autocut-Zooms"
             + (f" · Musik: {os.path.basename(music)}" if music else "") + (f" · „{vc_title_for(reason)}“"

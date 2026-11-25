@@ -1,6 +1,6 @@
 {
-  "version": "5.6",
-  "notes": "Vice-City-Edit auch für YouTube (Shorts + 16:9), pro Plattform an/aus",
+  "version": "5.7",
+  "notes": "NCS-Musik im Vice-City-Edit (mit automatischem Credit) + Schriftart wählbar (Impact, Pricedown …)",
   "files": [
     "StreamClipper.pyw",
     "clipper_core.py",

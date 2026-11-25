@@ -34,7 +34,7 @@ except ImportError:  # ältere Updater kennen live_clipper.py noch nicht → sel
     except Exception:
         live_clipper = None
 
-VERSION = "5.6"
+VERSION = "5.7"
 
 # Fertige Live-Profile für GTA 6 (jederzeit umschaltbar, gilt sofort – auch mitten im Stream)
 _ALL = ("cops", "siren", "shots", "explosion", "bluelight", "vision", "game", "voice", "chat", "clipreq")
@@ -1024,6 +1024,35 @@ class App:
         for k, txt in rows:
             ttk.Checkbutton(f, text=txt, variable=v[k]).grid(row=r, column=0, columnspan=3, sticky="w")
             r += 1
+        ttk.Label(f, text="🔤 Schriftart für den Titel", style="Panel.TLabel").grid(row=r, column=0, sticky="w",
+                                                                                 pady=(10, 2))
+        v_font = tk.StringVar(value=self.s.get("vc_font", "Impact"))
+        v_ffile = tk.StringVar(value=self.s.get("vc_font_file", ""))
+        fcb = ttk.Combobox(f, textvariable=v_font, values=list(core.VC_FONTS), state="readonly", width=30)
+        fcb.grid(row=r, column=1, columnspan=2, sticky="w", pady=(10, 2))
+        r += 1
+        v_fhint = tk.StringVar()
+
+        def font_hint(*_):
+            name = v_font.get()
+            if name.startswith("Eigene"):
+                p_ = filedialog.askopenfilename(parent=win, title="Schrift wählen",
+                                                filetypes=[("Schriften", "*.ttf *.otf")])
+                if p_:
+                    v_ffile.set(p_)
+            ff = core.font_file(name, v_ffile.get())
+            if ff:
+                v_fhint.set(f"✅ {os.path.basename(ff)}")
+            elif name.startswith("Pricedown"):
+                v_fhint.set("⚠ Pricedown ist nicht installiert: kostenlos bei typodermicfonts.com laden → "
+                            "Rechtsklick auf die Datei → Installieren. Bis dahin nimmt die App Impact.")
+            else:
+                v_fhint.set("⚠ Schrift nicht gefunden – die App nimmt Impact.")
+        fcb.bind("<<ComboboxSelected>>", font_hint)
+        ttk.Label(f, textvariable=v_fhint, style="Muted.TLabel", wraplength=470).grid(row=r, column=0, columnspan=3,
+                                                                                    sticky="w")
+        font_hint()
+        r += 1
         ttk.Label(f, text="🎵 Musik (Datei oder Ordner – bei Ordner zufälliger Song)", style="Panel.TLabel").grid(
             row=r, column=0, columnspan=3, sticky="w", pady=(10, 2))
         r += 1
@@ -1038,12 +1067,34 @@ class App:
             parent=win, title="Musik-Ordner wählen") or v_mus.get())).pack(side="left", padx=4)
         ttk.Button(bf, text="✕", width=3, command=lambda: v_mus.set("")).pack(side="left")
         r += 1
+
+        def ncs():
+            d = os.path.join(os.path.expanduser("~"), "Music", "NCS")
+            os.makedirs(d, exist_ok=True)
+            v_mus.set(d)
+            import webbrowser
+            webbrowser.open("https://ncs.io/music")
+            try:
+                os.startfile(d)
+            except Exception:
+                pass
+            messagebox.showinfo("🎵 NCS-Musik", "Auf ncs.io Songs suchen → „Download“ → die MP3s in den Ordner "
+                                "„Musik\\NCS“ legen (hat sich gerade geöffnet). Die App nimmt pro Clip einen "
+                                "zufälligen Song daraus und schreibt Künstler + Song automatisch in die "
+                                "YouTube-Beschreibung (das verlangt NCS).", parent=win)
+        ttk.Button(f, text="🎧 NCS-Musik holen (ncs.io) …", command=ncs).grid(row=r, column=0, sticky="w", pady=(4, 0))
+        r += 1
+        v_mtt = tk.BooleanVar(value=self.s.get("vc_music_tt", False))
+        ttk.Checkbutton(f, text="Musik auch in TikTok-Clips (nicht empfohlen bei NCS)", variable=v_mtt).grid(
+            row=r, column=0, columnspan=3, sticky="w")
+        r += 1
         v_vol = tk.IntVar(value=int(self.s.get("vc_vol", 30)))
         ttk.Label(f, text="Musik-Lautstärke (%)", style="Panel.TLabel").grid(row=r, column=0, sticky="w", pady=4)
         ttk.Spinbox(f, from_=5, to=100, increment=5, textvariable=v_vol, width=6).grid(row=r, column=1, sticky="w")
         r += 1
-        ttk.Label(f, text="Die Musik wird automatisch leiser, wenn im Spiel was knallt. Tipp: nimm lizenzfreie "
-                          "Musik (z. B. YouTube-Audio-Mediathek) – TikTok schaltet geschützte Songs sonst stumm.",
+        ttk.Label(f, text="Die Musik wird automatisch leiser, wenn im Spiel was knallt. NCS ist laut NCS nur für "
+                          "YouTube und Twitch freigegeben – auf TikTok füg beim Posten lieber einen TikTok-Sound "
+                          "hinzu (da gibt es auch NCS-Songs).",
                   style="Muted.TLabel", wraplength=470).grid(row=r, column=0, columnspan=3, sticky="w")
         r += 1
 
@@ -1051,6 +1102,9 @@ class App:
             for k, var in v.items():
                 self.s[k] = bool(var.get())
             self.s["vc_music"] = v_mus.get().strip()
+            self.s["vc_font"] = v_font.get()
+            self.s["vc_font_file"] = v_ffile.get()
+            self.s["vc_music_tt"] = bool(v_mtt.get())
             try:
                 self.s["vc_vol"] = max(0, min(100, int(v_vol.get())))
             except Exception:
@@ -2840,6 +2894,9 @@ class App:
                     self.log(f"   🌴 #{i + 1} mit Vice-City-Edit für {'YouTube' if plat == 'yt' else 'TikTok'}")
                 title, desc, tags = uploader.build_text(conf, src.get("title"), i + 1, h.get("reason", ""),
                                                         short=not wide_mode)
+                cred = core.vc_credit(path) if path.endswith("_vc.mp4") else ""
+                if cred and plat == "yt":
+                    desc = (desc + "\n\n" + cred).strip()  # NCS verlangt Künstler + Song in der Beschreibung
                 try:
                     if plat == "yt":
                         self.log(f"▶ YouTube: lade #{i + 1} hoch – „{title}“")
