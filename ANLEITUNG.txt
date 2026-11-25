@@ -14,6 +14,17 @@ SO GEHT'S
   4. "Ausgewählte clippen" oder "Alle clippen"
   Oder einfach "Alles automatisch" = analysieren + alle Top-Clips schneiden.
 
+NEU IN 5.1 – 🌴 VICE-CITY-EDIT FÜR TIKTOK
+  - Haken „🌴 Vice-City-Edit für TikTok“ (links unter TikTok-Stil) → jeder Hochkant-Clip bekommt:
+    🎨 Neon-Look (Pink/Türkis, kräftige Farben, Vignette, Blitz bei Explosionen)
+    ✂ Autocut: Zoom + Wackler genau bei Schüssen, Crashs, Explosionen (findet die Knalle selbst)
+    🌴 pinken Titel am Anfang – automatisch passend: RAUBÜBERFALL, VERFOLGUNG, BOOM, SCHIESSEREI
+    📺 „twitch.tv/ximjxstinn“ unten
+    🎵 Musik leise drunter (Datei oder Ordner = zufälliger Song) – wird automatisch leiser, wenn es knallt
+  - „Einstellen …“: jedes Teil einzeln an/aus, Musik wählen, Lautstärke.
+  - Gilt für VOD-Clips, Live-Clips und PS5-Clips. Klappt der Edit mal nicht, bleibt der normale Clip.
+  - Musik-Tipp: lizenzfreie Songs nehmen – TikTok schaltet geschützte Musik sonst stumm.
+
 NEU IN 5.0 – 🔫 RAUB/KAMPF AUTOMATISCH ERKANNT (OHNE BEFEHL)
   - Die App erkennt jetzt selbst, wenn du eine Waffe gezogen hast: oben rechts erscheint die Munitions-
     Anzeige (z. B. „30 240“). Ist sie über eine halbe Minute meistens da → automatisch Raub-Modus:

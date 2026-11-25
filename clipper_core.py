@@ -14,6 +14,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import urllib.request
 import zipfile
@@ -1233,11 +1234,27 @@ def cut_from_file(src, start, end, out_path, runner):
     return out_path
 
 
-def make_vertical(src, out_path, style, runner):
+def make_vertical(src, out_path, style, runner, edit=None, reason="", log=None):
+    """edit: Einstellungen (vc_on …) → zusätzlich Vice-City-Edit. Klappt der nicht, bleibt der normale Clip."""
     runner.run([tool("ffmpeg"), "-hide_banner", "-loglevel", "error", "-y", "-i", src,
                 "-filter_complex", VERTICAL_FILTERS.get(style, VERTICAL_FILTERS["blur"]),
                 "-map", "[v]", "-map", "0:a?", "-c:v", "libx264", "-preset", "veryfast", "-crf", "21",
                 "-r", "30", "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", out_path], quiet=True)
+    if edit and edit.get("vc_on"):
+        tmp = out_path[:-4] + "_vc.mp4"
+        try:
+            vicecity_edit(out_path, tmp, edit, runner, reason, edit.get("channel") or "ximjxstinn", log)
+            if os.path.isfile(tmp) and os.path.getsize(tmp) > 10000:
+                os.replace(tmp, out_path)
+        except Cancelled:
+            raise
+        except Exception as e:
+            if log:
+                log(f"   ⚠ Vice-City-Edit ging nicht ({str(e)[:120]}) – normaler Clip bleibt")
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
     return out_path
 
 
@@ -1262,3 +1279,153 @@ def safe_name(text, maxlen=40):
     text = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "", text or "").strip()
     text = re.sub(r"\s+", "_", text)
     return text[:maxlen] or "stream"
+
+
+# --------------------------------------------------------------------------- #
+#  🌴 Vice-City-Edit für TikTok: Neon-Look, Autocut-Zooms, Titel, Musik
+# --------------------------------------------------------------------------- #
+VC_DEFAULTS = {"vc_on": False, "vc_look": True, "vc_cut": True, "vc_title": True, "vc_music": "",
+               "vc_vol": 30, "vc_twitch": True}
+MUSIC_EXT = (".mp3", ".m4a", ".wav", ".ogg", ".aac", ".flac")
+
+
+def vc_title_for(reason):
+    """Passender Titel aus dem Clip-Grund."""
+    r = (reason or "").lower()
+    for keys, title in ((("raub", "kampf", "waffe"), "RAUBÜBERFALL"), (("explosion",), "BOOM"),
+                        (("cops", "blaulicht", "sirene", "verfolgung"), "VERFOLGUNG"),
+                        (("schüsse", "schuss"), "SCHIESSEREI"), (("clip",), "CLIP DES CHATS")):
+        if any(k in r for k in keys):
+            return title
+    return "VICE CITY"
+
+
+def pick_music(path):
+    """Datei → diese Datei. Ordner → zufälliger Song daraus. Sonst None."""
+    import random
+    if not path:
+        return None
+    if os.path.isfile(path):
+        return path
+    if os.path.isdir(path):
+        songs = [os.path.join(path, f) for f in os.listdir(path) if f.lower().endswith(MUSIC_EXT)]
+        return random.choice(songs) if songs else None
+    return None
+
+
+def action_moments(path, runner=None, max_n=8):
+    """Sekunden mit harten Knallen im Clip (Schüsse, Crash, Explosion) – dort setzt der Autocut Zooms."""
+    import array
+    kw = {"creationflags": 0x08000000} if os.name == "nt" else {}
+    sr = 8000
+    raw = subprocess.run([tool("ffmpeg"), "-v", "error", "-i", path, "-vn", "-ac", "1", "-ar", str(sr),
+                          "-f", "s16le", "-"], capture_output=True, stdin=subprocess.DEVNULL, timeout=300, **kw).stdout
+    pcm = array.array("h", raw[:len(raw) // 2 * 2])
+    if sys.byteorder == "big":
+        pcm.byteswap()
+    win = sr // 20  # 50 ms
+    db = []
+    for k in range(len(pcm) // win):
+        seg = pcm[k * win:(k + 1) * win]
+        e = sum(x * x for x in seg[::4]) / max(1, len(seg[::4])) / (32768.0 ** 2)
+        db.append(10 * math.log10(e) if e > 1e-10 else -100.0)
+    if len(db) < 40:
+        return []
+    srt = sorted(db)
+    loud = srt[int(len(srt) * 0.85)]
+    cand = []
+    for i in range(4, len(db)):
+        base = sorted(db[max(0, i - 20):i])[len(db[max(0, i - 20):i]) // 2]
+        jump = db[i] - base
+        if jump >= 9 and db[i] >= loud - 2:
+            cand.append((jump + (db[i] - loud), i * 0.05))
+    cand.sort(reverse=True)
+    out = []
+    for sc, t in cand:
+        if t > 0.4 and all(abs(t - o) >= 1.2 for o in out):
+            out.append(t)
+        if len(out) >= max_n:
+            break
+    return sorted(out)
+
+
+def _ff_esc(path):
+    """Pfad für ffmpeg-Filter (Windows: C\\:/...)."""
+    return path.replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
+
+
+def _font():
+    for f in ("C:/Windows/Fonts/segoescb.ttf", "C:/Windows/Fonts/impact.ttf", "C:/Windows/Fonts/arialbd.ttf",
+              "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"):
+        if os.path.isfile(f):
+            return f
+    return None
+
+
+def vicecity_edit(src, out_path, opts, runner, reason="", channel="ximjxstinn", log=None):
+    """Hochkant-Clip (1080x1920) im Vice-City-Stil: Neon-Farben + Glow, Zooms/Wackler bei Action (Autocut),
+    pinker Titel am Anfang, Twitch-Hinweis, Musik leise drunter. Gibt out_path zurück."""
+    vf = []
+    # Autocut: kurze Zoom-Ruckler + Wackeln genau bei den Knallen
+    moments = action_moments(src) if opts.get("vc_cut", True) else []
+    if moments:
+        pulse = "+".join(f"0.13*max(0,1-abs(t-{m:.2f})/0.22)" for m in moments)
+        shake = "+".join(f"18*sin(t*70)*max(0,1-abs(t-{m:.2f})/0.18)" for m in moments)
+        vf.append(f"scale=w='trunc(1080*(1+{pulse})/2)*2':h='trunc(1920*(1+{pulse})/2)*2':eval=frame")
+        vf.append(f"crop=1080:1920:x='(iw-1080)/2+({shake})':y='(ih-1920)/2'")
+    if opts.get("vc_look", True):
+        # Vice City: Pink in den Lichtern, Türkis/Blau in den Schatten, kräftige Farben, Vignette
+        vf.append("eq=saturation=1.35:contrast=1.08:brightness=0.01")
+        vf.append("colorbalance=rs=-0.06:gs=0.02:bs=0.10:rm=0.04:gm=-0.03:bm=0.05:rh=0.10:gh=-0.05:bh=0.06")
+        vf.append("vignette=angle=PI/6")
+    if moments and opts.get("vc_look", True):
+        flash = "+".join(f"0.22*max(0,1-abs(t-{m:.2f})/0.08)" for m in moments[:3])
+        vf.append(f"eq=brightness='{flash}':eval=frame")
+    font = _font()
+    tmp_txt = []
+    if font and opts.get("vc_title", True):
+        title = vc_title_for(reason)
+        tf = os.path.join(tempfile.gettempdir(), f"sc_vc_title_{os.getpid()}_{threading.get_ident()}.txt")
+        with open(tf, "w", encoding="utf-8") as f:
+            f.write(title)
+        tmp_txt.append(tf)
+        alpha = "if(lt(t,0.2),t/0.2,if(lt(t,3),1,if(lt(t,3.6),(3.6-t)/0.6,0)))"
+        common = f"fontfile='{_ff_esc(font)}':textfile='{_ff_esc(tf)}':x=(w-text_w)/2:y=h*0.14:alpha='{alpha}'"
+        # Glow (türkis, versetzt) + pinke Schrift mit dunklem Rand
+        fs = max(60, min(110, int(1500 / max(1, len(title)))))
+        vf.append(f"drawtext={common}:fontsize={fs}:fontcolor=0x00E5FF@0.55:x=(w-text_w)/2+6:y=h*0.14+6")
+        vf.append(f"drawtext={common}:fontsize={fs}:fontcolor=0xFF2D95:borderw=5:bordercolor=0x2B0A3D")
+    if font and opts.get("vc_twitch", True):
+        tf2 = os.path.join(tempfile.gettempdir(), f"sc_vc_tw_{os.getpid()}_{threading.get_ident()}.txt")
+        with open(tf2, "w", encoding="utf-8") as f:
+            f.write(f"twitch.tv/{channel}")
+        tmp_txt.append(tf2)
+        vf.append(f"drawtext=fontfile='{_ff_esc(font)}':textfile='{_ff_esc(tf2)}':fontsize=46:fontcolor=white@0.9:"
+                  f"borderw=3:bordercolor=0xFF2D95:x=(w-text_w)/2:y=h*0.86")
+    vf.append("format=yuv420p")
+    music = pick_music(opts.get("vc_music") or "")
+    cmd = [tool("ffmpeg"), "-hide_banner", "-loglevel", "error", "-y", "-i", src]
+    if music:
+        vol = max(0, min(100, int(opts.get("vc_vol", 30)))) / 100.0
+        cmd += ["-stream_loop", "-1", "-i", music]
+        fc = (f"[0:v]{','.join(vf)}[v];[1:a]volume={vol:.2f},aresample=48000[m];"
+              f"[0:a]aresample=48000,asplit[g][sc];[m][sc]sidechaincompress=threshold=0.05:ratio=6:release=250[md];"
+              f"[g][md]amix=inputs=2:duration=first:normalize=0[a]")
+        cmd += ["-filter_complex", fc, "-map", "[v]", "-map", "[a]", "-shortest"]
+    else:
+        cmd += ["-filter_complex", f"[0:v]{','.join(vf)}[v]", "-map", "[v]", "-map", "0:a?"]
+    cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-r", "30", "-c:a", "aac", "-b:a", "160k",
+            "-movflags", "+faststart", out_path]
+    try:
+        runner.run(cmd, quiet=True)
+    finally:
+        for f in tmp_txt:
+            try:
+                os.remove(f)
+            except OSError:
+                pass
+    if log:
+        log(f"   🌴 Vice-City-Edit: {len(moments)} Autocut-Zooms"
+            + (f" · Musik: {os.path.basename(music)}" if music else "") + (f" · „{vc_title_for(reason)}“"
+                                                                           if opts.get('vc_title', True) else ""))
+    return out_path

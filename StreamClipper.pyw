@@ -34,7 +34,7 @@ except ImportError:  # ältere Updater kennen live_clipper.py noch nicht → sel
     except Exception:
         live_clipper = None
 
-VERSION = "5.0"
+VERSION = "5.1"
 
 # Fertige Live-Profile für GTA 6 (jederzeit umschaltbar, gilt sofort – auch mitten im Stream)
 _ALL = ("cops", "siren", "shots", "explosion", "bluelight", "vision", "game", "voice", "chat", "clipreq")
@@ -101,6 +101,7 @@ VSTYLES = {"Blur-Hintergrund": "blur", "Mitte zuschneiden": "crop"}
 QUALITIES = ["1080p", "720p", "Beste"]
 
 DEFAULTS = {
+    **core.VC_DEFAULTS,
     "channel": "ximjxstinn", "count": 10, "pre": 18, "post": 10, "min_gap": 90, "skip_start": 2,
     "w_chat": 65, "audio": True, "fmt": FORMATS[2], "vstyle": "Blur-Hintergrund", "quality": "1080p",
     "bestof": False, "nomenu": True, "vis": True, "mode": "Maximal (alles Spannende)", "live_times": [], "keywords": core.DEFAULT_KEYWORDS,
@@ -382,6 +383,11 @@ class App:
         self.v_vstyle = tk.StringVar(value=s["vstyle"])
         ttk.Combobox(left, textvariable=self.v_vstyle, values=list(VSTYLES), state="readonly", width=22).grid(
             row=r, column=1, columnspan=2, sticky="we", pady=2)
+        r += 1
+        self.v_vc = tk.BooleanVar(value=s.get("vc_on", False))
+        ttk.Checkbutton(left, text="🌴 Vice-City-Edit für TikTok (Look, Autocut, Titel, Musik)", variable=self.v_vc,
+                        command=self._toggle_vc).grid(row=r, column=0, columnspan=2, sticky="w", pady=2)
+        ttk.Button(left, text="Einstellen …", command=self.vc_settings).grid(row=r, column=2, sticky="e", pady=2)
         r += 1
         ttk.Label(left, text="Qualität", style="Panel.TLabel").grid(row=r, column=0, sticky="w", pady=2)
         self.v_quality = tk.StringVar(value=s["quality"])
@@ -975,6 +981,84 @@ class App:
             self.s["live_autoprof"] = False
             self.v_live_profile.set(CUSTOM_PROFILE)
             self.save()
+
+    def _toggle_vc(self):
+        self.s["vc_on"] = bool(self.v_vc.get())
+        self._push_vc()
+        self.log("🌴 Vice-City-Edit " + ("AN – neue TikTok-Clips bekommen Neon-Look, Autocut-Zooms, Titel"
+                                        + (" und Musik" if core.pick_music(self.s.get("vc_music")) else "")
+                                        if self.s["vc_on"] else "aus"))
+
+    def _push_vc(self):
+        """Speichern + laufende Live-/PS5-Clipper sofort mit den neuen Edit-Einstellungen versorgen."""
+        self.save()
+        vc = {k: self.s.get(k, d) for k, d in core.VC_DEFAULTS.items()}
+        for x in (getattr(self, "live", None), getattr(self, "rp", None), getattr(self, "cap", None)):
+            if x:
+                x.st.update(vc)
+
+    def vc_settings(self):
+        win = tk.Toplevel(self.root)
+        win.title("🌴 Vice-City-Edit")
+        win.configure(bg=BG)
+        win.transient(self.root)
+        f = ttk.Frame(win, style="Panel.TFrame", padding=16)
+        f.pack(fill="both", expand=True, padx=12, pady=12)
+        ttk.Label(f, text="🌴 Vice-City-Edit für TikTok-Clips", style="Sec.TLabel").grid(row=0, column=0,
+                                                                                       columnspan=3, sticky="w")
+        ttk.Label(f, text="Wird in jeden Hochkant-Clip eingebaut, bevor er hochgeladen wird (VOD + Live + PS5).",
+                  style="Muted.TLabel", wraplength=470).grid(row=1, column=0, columnspan=3, sticky="w", pady=(0, 8))
+        v = {k: tk.BooleanVar(value=self.s.get(k, core.VC_DEFAULTS[k]))
+             for k in ("vc_on", "vc_look", "vc_cut", "vc_title", "vc_twitch")}
+        rows = [("vc_on", "Vice-City-Edit einschalten"),
+                ("vc_look", "🎨 Neon-Look (Pink/Türkis, kräftige Farben, Vignette, Blitz bei Explosionen)"),
+                ("vc_cut", "✂ Autocut: Zoom + Wackler genau bei Schüssen, Crashs, Explosionen"),
+                ("vc_title", "🌴 Pinker Titel am Anfang (RAUBÜBERFALL, VERFOLGUNG, BOOM … automatisch)"),
+                ("vc_twitch", "📺 „twitch.tv/ximjxstinn“ unten einblenden")]
+        r = 2
+        for k, txt in rows:
+            ttk.Checkbutton(f, text=txt, variable=v[k]).grid(row=r, column=0, columnspan=3, sticky="w")
+            r += 1
+        ttk.Label(f, text="🎵 Musik (Datei oder Ordner – bei Ordner zufälliger Song)", style="Panel.TLabel").grid(
+            row=r, column=0, columnspan=3, sticky="w", pady=(10, 2))
+        r += 1
+        v_mus = tk.StringVar(value=self.s.get("vc_music", ""))
+        ttk.Entry(f, textvariable=v_mus, width=46).grid(row=r, column=0, sticky="we")
+        bf = ttk.Frame(f, style="Panel.TFrame")
+        bf.grid(row=r, column=1, columnspan=2, sticky="w", padx=4)
+        ttk.Button(bf, text="Datei …", command=lambda: v_mus.set(filedialog.askopenfilename(
+            parent=win, title="Song wählen", filetypes=[("Musik", "*.mp3 *.m4a *.wav *.ogg *.aac *.flac")])
+            or v_mus.get())).pack(side="left")
+        ttk.Button(bf, text="Ordner …", command=lambda: v_mus.set(filedialog.askdirectory(
+            parent=win, title="Musik-Ordner wählen") or v_mus.get())).pack(side="left", padx=4)
+        ttk.Button(bf, text="✕", width=3, command=lambda: v_mus.set("")).pack(side="left")
+        r += 1
+        v_vol = tk.IntVar(value=int(self.s.get("vc_vol", 30)))
+        ttk.Label(f, text="Musik-Lautstärke (%)", style="Panel.TLabel").grid(row=r, column=0, sticky="w", pady=4)
+        ttk.Spinbox(f, from_=5, to=100, increment=5, textvariable=v_vol, width=6).grid(row=r, column=1, sticky="w")
+        r += 1
+        ttk.Label(f, text="Die Musik wird automatisch leiser, wenn im Spiel was knallt. Tipp: nimm lizenzfreie "
+                          "Musik (z. B. YouTube-Audio-Mediathek) – TikTok schaltet geschützte Songs sonst stumm.",
+                  style="Muted.TLabel", wraplength=470).grid(row=r, column=0, columnspan=3, sticky="w")
+        r += 1
+
+        def save():
+            for k, var in v.items():
+                self.s[k] = bool(var.get())
+            self.s["vc_music"] = v_mus.get().strip()
+            try:
+                self.s["vc_vol"] = max(0, min(100, int(v_vol.get())))
+            except Exception:
+                pass
+            self.v_vc.set(self.s["vc_on"])
+            self._push_vc()
+            if self.s["vc_music"] and not core.pick_music(self.s["vc_music"]):
+                self.log("⚠ Vice-City-Edit: In der Musik-Auswahl wurde kein Song gefunden.")
+            self.log("✔ Vice-City-Edit gespeichert" + (" (AN)" if self.s["vc_on"] else " (aus)")
+                     + " – gilt für die nächsten Clips.")
+            win.destroy()
+        ttk.Button(f, text="Speichern", style="Accent.TButton", command=save).grid(row=r, column=0, columnspan=3,
+                                                                                   sticky="we", pady=(12, 0))
 
     MODE_LOOK = {  # modus: (text, hintergrund, schrift)
         "raub": ("💰🔫  RAUB-MODUS  –  clippt jede Action", "#e91916", "#ffffff"),
@@ -2355,7 +2439,8 @@ class App:
             tall = None
             if want_tall:
                 self.log("   📱 TikTok-Version …")
-                tall = core.make_vertical(wide, base + "_tiktok.mp4", vstyle, self.runner)
+                tall = core.make_vertical(wide, base + "_tiktok.mp4", vstyle, self.runner, edit=st,
+                                          reason=h.get("reason", ""), log=self.log)
             h["files"] = {"wide": wide if want_wide else None, "tall": tall, "vstyle": vstyle}
             # Qualitäts-Check
             check = tall or wide
@@ -2706,7 +2791,8 @@ class App:
                     elif src_wide and os.path.isfile(src_wide):
                         self.log(f"   📱 Erstelle Hochkant-Version für #{i + 1} …")
                         path = core.make_vertical(src_wide, os.path.splitext(src_wide)[0] + "_tiktok.mp4",
-                                                  files.get("vstyle", "blur"), self.runner)
+                                                  files.get("vstyle", "blur"), self.runner, edit=self.s,
+                                                  reason=h.get("reason", ""), log=self.log)
                         files["tall"] = path
                     else:
                         self.log(f"⚠ Datei für Clip #{i + 1} nicht gefunden – übersprungen")

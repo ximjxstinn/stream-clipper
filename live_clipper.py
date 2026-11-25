@@ -1546,7 +1546,8 @@ class LiveClipper:
                 raise LiveError("Clip-Download fehlgeschlagen")
             tall = None
             if self.st.get("fmt", "") != "16:9 (YouTube/Twitch)":
-                tall = core.make_vertical(wide, base + "_tiktok.mp4", self.st.get("vstyle_key", "blur"), runner)
+                tall = core.make_vertical(wide, base + "_tiktok.mp4", self.st.get("vstyle_key", "blur"), runner,
+                                          edit=self.st, reason=trig.get("reason", ""), log=self.log)
             dur = float(info.get("duration") or length)
             ok, probs, qinfo = core.check_clip(tall or wide, dur, runner, tall=bool(tall))
             thrill = None
@@ -2089,7 +2090,8 @@ class RemotePlayClipper(LiveClipper):
                     wide = mp4
             tall = None
             if self.st.get("fmt", "") != "16:9 (YouTube/Twitch)":
-                tall = core.make_vertical(wide, base + "_tiktok.mp4", self.st.get("vstyle_key", "blur"), runner)
+                tall = core.make_vertical(wide, base + "_tiktok.mp4", self.st.get("vstyle_key", "blur"), runner,
+                                          edit=self.st, reason=trig.get("reason", ""), log=self.log)
             ok, probs, qinfo = core.check_clip(tall or wide, 0, runner, tall=bool(tall))
             thrill = None
             if self.st.get("live_rate", True):

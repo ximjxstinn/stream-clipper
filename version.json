@@ -1,6 +1,6 @@
 {
-  "version": "5.0",
-  "notes": "Raub/Kampf automatisch (Waffe gezogen → Raub-Modus, ohne !raub) + großes farbiges Modus-Schild oben rechts",
+  "version": "5.1",
+  "notes": "Vice-City-Edit für TikTok (Neon-Look, Autocut-Zooms, Titel, Musik) + Raub automatisch + Modus-Schild",
   "files": [
     "StreamClipper.pyw",
     "clipper_core.py",
