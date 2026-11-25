@@ -404,6 +404,15 @@ def siren_score(tones):
     return 0.0
 
 
+def LIVE_IN(url):
+    """ffmpeg-Optionen für Twitch-Live: am LIVE-Ende einsteigen (nicht den ganzen Stream von vorn lesen)
+    und in Echtzeit lesen – sonst rattert ffmpeg alte Minuten durch und die Erkennung sieht Vergangenes."""
+    if not str(url).startswith("http"):
+        return []
+    return ["-use_wallclock_as_timestamps", "1", "-live_start_index", "-2", "-reconnect", "1",
+            "-reconnect_streamed", "1", "-reconnect_delay_max", "5"]
+
+
 def _stream_url(channel, fmt):
     kw = {"creationflags": 0x08000000} if IS_WIN else {}
     out = subprocess.run([core.tool("yt-dlp"), "-g", "-f", fmt, f"https://www.twitch.tv/{channel}"],
@@ -432,7 +441,7 @@ class AudioReader(threading.Thread):
             try:
                 url = self.source or _stream_url(self.channel, "audio_only/Audio_Only/worst")
                 self.proc = subprocess.Popen(
-                    [core.tool("ffmpeg"), "-hide_banner", "-loglevel", "error", "-nostats", "-i", url, "-vn",
+                    [core.tool("ffmpeg"), "-hide_banner", "-loglevel", "error", "-nostats", *LIVE_IN(url), "-i", url, "-vn",
                      "-ac", "1", "-ar", str(SR), "-f", "s16le", "-"],
                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, **kw)
                 threading.Thread(target=lambda: [err_tail.append(l.decode("utf-8", "replace").strip())
@@ -582,8 +591,7 @@ class VideoReader(threading.Thread):
                     inp = list(self.input_args() if callable(self.input_args) else self.input_args)
                 else:
                     url = self.source or _stream_url(self.channel, "160p/160p30/360p/worst[vcodec!=none]/worst")
-                    inp = (["-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5", "-i", url]
-                           if url.startswith("http") else ["-i", url])
+                    inp = [*LIVE_IN(url), "-i", url]
                     self.last_frame = time.time()
                 self.proc = subprocess.Popen(
                     [core.tool("ffmpeg"), "-hide_banner", "-loglevel", "error", "-nostats", *inp, "-an",
@@ -597,7 +605,14 @@ class VideoReader(threading.Thread):
                     if first:
                         self.log("   🎥 Live-Bild verbunden – erkenne Cops, Explosionen, Action und Blaulicht")
                         first = False
-                    self.last_frame = time.time()
+                    now_r = time.time()
+                    self.last_frame = now_r
+                    # Schutz gegen Bild-Schwall (Zeitsprünge bei Werbung/PS5-Stream → ffmpeg liefert tausende
+                    # doppelte Bilder): höchstens ~5 Bilder pro Sekunde auswerten, Rest verwerfen
+                    if not self.source and not self.input_args and now_r - getattr(self, "_last_used", 0) < 0.2:
+                        self.dropped = getattr(self, "dropped", 0) + 1
+                        continue
+                    self._last_used = now_r
                     self.frames += 1
                     motion, red, blue, prev = analyze_video_frame(raw, prev)
                     now_t = time.time()

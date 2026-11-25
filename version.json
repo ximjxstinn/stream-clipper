@@ -1,6 +1,6 @@
 {
-  "version": "4.8.1",
-  "notes": "Fix: Live-Bild hing nach kurzer Zeit – verbindet jetzt automatisch neu",
+  "version": "4.8.2",
+  "notes": "Fix: Live-Bild beim PS5-Stream (Bild-Schwall/Hänger) – Cops/Explosionen werden wieder erkannt",
   "files": [
     "StreamClipper.pyw",
     "clipper_core.py",
