@@ -557,7 +557,11 @@ def scene_frame(rgb):
             i = 3 * (y * VW + x)
             small.append((rgb[i], rgb[i + 1], rgb[i + 2]))
     red, blue = core.minimap_colors(mm)
-    return red, blue, core.frame_look(small)
+    try:
+        fire = core.fire_frac(rgb, VW, VH, 2)
+    except Exception:
+        fire = 0.0
+    return red, blue, core.frame_look(small) + (fire,)
 
 
 def bluelight_score(frames):
@@ -870,8 +874,11 @@ def test_replay(media, st, log, check=lambda: None, progress=lambda pc: None):
                     mblue = float(((mb > 110) & (mb - np.maximum(mr, mg) > 40)).mean())
                     sm = fr[2::8, 4::8].reshape(-1, 3)
                     sr_, sg_, sb_ = sm[:, 0].mean(), sm[:, 1].mean(), sm[:, 2].mean()
+                    fs = fr[::2, ::2]
+                    fire = float(((fs[..., 0] > 140) & (fs[..., 0] - fs[..., 2] > 70) & (fs[..., 1] > 40)
+                                  & (fs[..., 1] < fs[..., 0] - 15)).mean())
                     look = ((sr_ * 77 + sg_ * 150 + sb_ * 29) / 256, sr_ - sb_,
-                            float((sm.max(1) - sm.min(1)).mean()), float((sm.min(1) > 200).mean()))
+                            float((sm.max(1) - sm.min(1)).mean()), float((sm.min(1) > 200).mean()), fire)
                     det.add_scene(tv, mred, mblue, look)
                     vi += 1
                 if k % 10 == 0:
@@ -942,10 +949,10 @@ def rate_clip(path, base_game=None, base_motion=None, min_shots=4):
                     if core.police_score([(r, b) for r, b, _ in scn[st:st + 16]]))
     lowdb = [b[0] - b[4] for b in blocks]
     boom_video = False
-    for st in range(0, max(0, len(scn) - 7), 2):
-        if core.flash_score([lk for _, _, lk in scn[st:st + 8]]):
-            sec = (st + 6) / 4.0
-            if core.boom_near(lowdb, sec):
+    fseq = [(lk[4] if len(lk) > 4 else 0.0, lk[0]) for _, _, lk in scn]
+    for st in range(12, len(fseq)):
+        if core.fire_score(fseq[st - 12:st + 1]):
+            if core.boom_near(lowdb, st / 4.0, jump=12, loud=-45):
                 boom_video = True
                 break
     score, why = 0.0, []
@@ -1245,14 +1252,6 @@ class Detector:
             if now - self.police_seen > 40:
                 self.chase_clips = 0  # neue Verfolgung
             self.police_seen = now
-        flash = core.flash_score([lk for t, _, _, lk in sc if t >= now - 2.5]) if sc else 0.0
-        if flash:
-            pre = sorted(v for t, v in lowdb if now - 5 <= t < now - 2)
-            post = [v for t, v in lowdb if t >= now - 2]
-            boom_ok = (not lowdb) or (pre and post and max(post) - pre[len(pre) // 2] >= 20 and max(post) >= -42)
-            if boom_ok:
-                explosion = flash
-                self.boom_seen = now
         # 🔫 Waffe gezogen (Munitions-Anzeige) über längere Zeit = Kampf/Raub – auch ganz ohne Cops
         armed = self.armed_frac(now)
         if armed >= ARMED_ON:
@@ -1264,6 +1263,21 @@ class Detector:
         self.peak["armed"] = max(pk_armed, armed)
         cops_ctx = now - self.police_seen < 10
         # Schüsse nur mit Action drumherum (Cops, Bewegung, Explosion) – Schüsse im Hintergrund zählen nicht
+        # 💥 Explosion: plötzlicher Feuerball (nicht das ganze Bild – das ist ein Figurwechsel) + Knall
+        #    + es ist gerade was los (Cops, Kampf, Schüsse, Bewegung)
+        with self.lock:
+            seq = [(lk[4], lk[0]) for t, _, _, lk in self.scenes if t >= now - 3.5 and len(lk) > 4]
+        flash = core.fire_score(seq)
+        if flash:
+            pre = sorted(v for t, v in lowdb if now - 5 <= t < now - 2)
+            post = [v for t, v in lowdb if t >= now - 2]
+            boom_ok = (not lowdb) or (pre and post and max(post) - pre[len(pre) // 2] >= 12 and max(post) >= -45)
+            busy = (now - self.police_seen < 60 or now - self.fight_seen < 60 or shots >= 3)
+            if boom_ok and busy:
+                explosion = flash
+                self.boom_seen = now
+            else:
+                flash = 0.0
         fight_ctx = now - self.fight_seen < 20
         if shots and not (cops_ctx or fight_ctx or (vis or 0) >= 1.3 or flash):
             shots = 0

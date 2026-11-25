@@ -543,7 +543,41 @@ def flash_score(looks):
     return 0.0
 
 
-def boom_near(low, sec, before=4):
+def fire_frac(rgb, w, h, step=2):
+    """Anteil Feuer-Pixel (helles Orange/Gelb-Rot) im Bild. rgb: Bytes w*h*3."""
+    n = hit = 0
+    for y in range(0, h, step):
+        base = y * w * 3
+        for x in range(0, w, step):
+            i = base + 3 * x
+            r, g, b = rgb[i], rgb[i + 1], rgb[i + 2]
+            n += 1
+            if r > 140 and r - b > 70 and 40 < g < r - 15:
+                hit += 1
+    return hit / n if n else 0.0
+
+
+def fire_score(seq):
+    """Echte Explosion im Bild: ein Feuerball taucht PLÖTZLICH auf (1,5–30 % vom Bild), bleibt ein paar Bilder,
+    und das Bild wird NICHT komplett überblendet (= Figurwechsel/Szenenwechsel – die färben alles orange).
+    seq: [(feuer_anteil, helligkeit)] der letzten ~3 s, 4 pro Sekunde."""
+    if len(seq) < 12:
+        return 0.0
+    pre = seq[-12:-4]
+    cur = seq[-5:]
+    fmax = max(f for f, _ in cur)
+    if fmax < 0.015 or fmax > 0.30:
+        return 0.0
+    if max(f for f, _ in pre) > fmax / 3:
+        return 0.0  # war schon vorher da (Sonnenuntergang, Lichter, Rotlicht)
+    if sum(1 for f, _ in cur if f > 0.004) < 3:
+        return 0.0
+    if max(l for _, l in cur) - min(l for _, l in pre) > 55:
+        return 0.0  # ganzes Bild wird hell = Überblendung (Figurwechsel), keine Explosion
+    return min(3.0, fmax * 30)
+
+
+def boom_near(low, sec, before=4, jump=20, loud=-42):
     """low: Tiefbass-Pegel (dB) alle 0,1 s. Gibt True, wenn um Sekunde `sec` ein lauter Bass-Knall ist."""
     if not low:
         return True  # ohne Ton nicht blockieren
@@ -553,7 +587,7 @@ def boom_near(low, sec, before=4):
     if not pre or not post:
         return False
     pre_s = sorted(pre)
-    return max(post) - pre_s[len(pre_s) // 2] >= 20 and max(post) >= -42
+    return max(post) - pre_s[len(pre_s) // 2] >= jump and max(post) >= loud
 
 
 def analyze_bass(media, workdir, runner):
@@ -579,7 +613,7 @@ def analyze_bass(media, workdir, runner):
 
 def analyze_scenes(src, workdir, runner, log, duration=None):
     """Pro Sekunde: (polizei 0/1, explosion 0..3). Nutzt das Mini-Video der Bild-Analyse."""
-    cache = os.path.join(workdir, "scenes_v1.json")
+    cache = os.path.join(workdir, "scenes_v2.json")
     if os.path.isfile(cache):
         with open(cache) as f:
             return json.load(f)
@@ -640,7 +674,7 @@ def analyze_scenes(src, workdir, runner, log, duration=None):
         win = frames[max(0, sec * 4 - 8):sec * 4 + 8]
         pol = police_score([(f[0], f[1]) for f in win])
         fw2 = frames[max(0, sec * 4 - 4):sec * 4 + 4]
-        boom = flash_score([f[2] for f in fw2])
+        boom = 0.0  # Ganzbild-Blitz = Figurwechsel in GTA VI, keine Explosion (Explosionen erkennt der Live-Clipper)
         if boom and not boom_near(low, sec):
             boom = 0.0  # heller Blitz ohne Knall = Überblendung/Szenenwechsel, keine Explosion
         out.append([pol, round(boom, 2)])

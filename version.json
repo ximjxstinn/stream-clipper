@@ -1,6 +1,6 @@
 {
-  "version": "5.4",
-  "notes": "Weniger Waffe-gezogen-Clips: max. 3 pro Kampf, 90 s Abstand, max. 20/Std.",
+  "version": "5.5",
+  "notes": "Explosion nur noch bei echtem Feuerball + Knall + Action – Figurwechsel zählt nicht mehr",
   "files": [
     "StreamClipper.pyw",
     "clipper_core.py",
