@@ -499,6 +499,27 @@ class AudioReader(threading.Thread):
 #  Live-Bild: Bewegung (Action) + Blaulicht (rot/blau blinkend)
 # --------------------------------------------------------------------------- #
 VW, VH = 128, 72
+HH = core.HUD_H  # unter das Mini-Bild hängen wir den Ausschnitt oben rechts (Munitions-Anzeige)
+
+
+def vf_chain(pre):
+    """ffmpeg-Filter: Mini-Bild (VWxVH) + darunter der HUD-Ausschnitt oben rechts (HUD_WxHUD_H, links bündig)."""
+    x0, x1, y0, y1 = core.HUD_BOX
+    return (f"{pre},split[hx][hy];[hx]scale={VW}:{VH}[hm];"
+            f"[hy]crop=iw*{x1 - x0:.4f}:ih*{y1 - y0:.4f}:iw*{x0:.4f}:ih*{y0:.4f},scale={core.HUD_W}:{HH},"
+            f"pad={VW}:{HH}:0:0[hc];[hm][hc]vstack")
+
+
+def split_frame(raw):
+    """Gibt (mini-bild-bytes, hud-ausschnitt als numpy oder None) zurück."""
+    n = VW * VH * 3
+    main = raw[:n]
+    try:
+        import numpy as np
+        hud = np.frombuffer(raw[n:n + VW * HH * 3], dtype=np.uint8).reshape(HH, VW, 3)[:, :core.HUD_W]
+    except Exception:
+        hud = None
+    return main, hud
 
 
 def analyze_video_frame(rgb, prev_gray):
@@ -563,6 +584,7 @@ class VideoReader(threading.Thread):
         super().__init__(daemon=True)
         self.channel, self.on_frame, self.stop, self.log = channel.lower(), on_frame, stop, log
         self.on_scene = lambda *a: None
+        self.on_hud = lambda *a: None   # Munitions-Anzeige oben rechts (Waffe gezogen)
         self.source = source
         self.input_args = None  # z. B. Bildschirm-Aufnahme (PS Remote Play) statt Twitch
         self.proc = None
@@ -581,7 +603,7 @@ class VideoReader(threading.Thread):
     def run(self):
         kw = {"creationflags": 0x08000000} if IS_WIN else {}
         first = True
-        size = VW * VH * 3
+        size = VW * (VH + HH) * 3
         if not self.input_args:
             threading.Thread(target=self._watchdog, daemon=True).start()
         while not self.stop.is_set():
@@ -593,11 +615,11 @@ class VideoReader(threading.Thread):
                     inp = [*LIVE_IN(url), "-i", url]
                     self.last_frame = time.time()
                 if self.input_args or self.source:
-                    vf = ["-vf", f"fps=4,scale={VW}:{VH}"]
+                    vf = ["-vf", vf_chain("fps=4")]
                 else:
                     # Twitch live: jedes 8. Bild (30 fps → ~4/s), ohne Zeitstempel-Rechnerei – die Zeitsprünge im
                     # PS5-Stream ließen den fps-Filter tausende Bilder verdoppeln bzw. fast keine mehr liefern
-                    vf = ["-vf", f"select=not(mod(n\\,8)),scale={VW}:{VH}", "-fps_mode", "passthrough"]
+                    vf = ["-vf", vf_chain("select=not(mod(n\\,8))"), "-fps_mode", "passthrough"]
                 self.proc = subprocess.Popen(
                     [core.tool("ffmpeg"), "-hide_banner", "-loglevel", "error", "-nostats", *inp, "-an",
                      *vf, "-pix_fmt", "rgb24", "-f", "rawvideo", "-"],
@@ -625,11 +647,14 @@ class VideoReader(threading.Thread):
                             continue
                         win.append(now_r)
                     self.frames += 1
+                    raw, hud = split_frame(raw)
                     motion, red, blue, prev = analyze_video_frame(raw, prev)
                     now_t = time.time()
                     self.on_frame(now_t, motion, red, blue)
                     try:
                         self.on_scene(now_t, *scene_frame(raw))
+                        if hud is not None:
+                            self.on_hud(now_t, core.ammo_hud(hud))
                     except Exception:
                         pass
                 self.kill()
@@ -662,11 +687,16 @@ AUTO_MODES = {
 }
 AUTO_NAMES = {"action": "💰 Action-Modus (Cops/Explosionen gerade eben)",
               "normal": "🎮 Normal-Modus", "ruhig": "😎 Ruhig-Modus (lange nichts los)",
-              "raub": "💰🔫 Raub-Modus (per !raub – clippt jede Action, auch ohne Cops)"}
+              "raub": "💰🔫 Raub-Modus (Waffe gezogen / !raub – clippt jede Action, auch ohne Cops)"}
+
+
+def fight_on(det, now):
+    """Automatischer Raub-Modus: Waffe ist (fast) die ganze letzte halbe Minute gezogen."""
+    return getattr(det, "auto_raub", True) and now - getattr(det, "fight_seen", 0) < 60
 
 
 def auto_mode(det, now):
-    if getattr(det, "heist_until", 0) > now:
+    if getattr(det, "heist_until", 0) > now or fight_on(det, now):
         return "raub"
     last = max(det.police_seen, det.boom_seen)
     if last and now - last < 180:
@@ -692,7 +722,8 @@ def apply_settings(det, st, now):
     sens = SENSITIVITY.get(st.get("live_sens", "Mittel"), SENSITIVITY["Mittel"])
     det.t_chat, det.min_people = sens[0], sens[3]
     mode = None
-    if getattr(det, "heist_until", 0) > now:
+    det.auto_raub = bool(st.get("live_autoraub", True))
+    if getattr(det, "heist_until", 0) > now or fight_on(det, now):
         mode = "raub"
     elif st.get("live_autoprof"):
         mode = auto_mode(det, now)
@@ -723,7 +754,7 @@ def test_replay(media, st, log, check=lambda: None, progress=lambda pc: None):
                            "[f][hp][lp]amerge=inputs=3[out]", "-map", "[out]", "-ac", "3",
                            "-f", "s16le", "-"], stdout=subprocess.PIPE, stdin=subprocess.DEVNULL,
                           stderr=subprocess.DEVNULL, **kw)
-    vp = subprocess.Popen([ff, "-v", "error", "-i", media, "-an", "-vf", f"fps=4,scale={VW}:{VH}",
+    vp = subprocess.Popen([ff, "-v", "error", "-i", media, "-an", "-vf", vf_chain("fps=4"),
                            "-pix_fmt", "rgb24", "-f", "rawvideo", "-"], stdout=subprocess.PIPE,
                           stdin=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **kw)
     dur = 0.0
@@ -744,7 +775,7 @@ def test_replay(media, st, log, check=lambda: None, progress=lambda pc: None):
     y0, y1 = int(core.MM_BOX[2] * VH), int(core.MM_BOX[3] * VH)
     tr = [[-90.0, -90.0, -90.0], 99, None]
     prev_gray = None
-    fsz = VW * VH * 3
+    fsz = VW * (VH + HH) * 3
     vbuf = b""
     vi = 0
     k = 0
@@ -818,8 +849,10 @@ def test_replay(media, st, log, check=lambda: None, progress=lambda pc: None):
                         vbuf += chunk
                         if len(vbuf) < fsz:
                             break
-                    fr = np.frombuffer(vbuf[:fsz], dtype=np.uint8).reshape(VH, VW, 3).astype(np.int32)
+                    full_fr = np.frombuffer(vbuf[:fsz], dtype=np.uint8).reshape(VH + HH, VW, 3)
                     vbuf = vbuf[fsz:]
+                    fr = full_fr[:VH].astype(np.int32)
+                    det.add_hud(T0 + vi * 0.25, core.ammo_hud(full_fr[VH:, :core.HUD_W]))
                     r, g, b = fr[..., 0], fr[..., 1], fr[..., 2]
                     y = (r * 77 + g * 150 + b * 29) >> 8
                     red_m = (r > 170) & (g < 90) & (b < 110) & (r - np.maximum(g, b) > 90)
@@ -877,7 +910,7 @@ def rate_clip(path, base_game=None, base_motion=None, min_shots=4):
     kw = {"creationflags": 0x08000000} if IS_WIN else {}
     a = subprocess.run([core.tool("ffmpeg"), "-v", "error", "-i", path, "-vn", "-ac", "1", "-ar", str(SR),
                         "-f", "s16le", "-"], capture_output=True, stdin=subprocess.DEVNULL, timeout=300, **kw).stdout
-    v = subprocess.run([core.tool("ffmpeg"), "-v", "error", "-i", path, "-an", "-vf", f"fps=4,scale={VW}:{VH}",
+    v = subprocess.run([core.tool("ffmpeg"), "-v", "error", "-i", path, "-an", "-vf", vf_chain("fps=4"),
                         "-pix_fmt", "rgb24", "-f", "rawvideo", "-"], capture_output=True, stdin=subprocess.DEVNULL,
                        timeout=300, **kw).stdout
     pcm = array.array("h", a[:len(a) // 2 * 2])
@@ -889,10 +922,14 @@ def rate_clip(path, base_game=None, base_motion=None, min_shots=4):
         smp = [x / 32768.0 for x in pcm[k * FRAME:(k + 1) * FRAME]]
         g, vd, tone = analyze_audio_frame(smp, hp)
         blocks.append((g, g - vd, count_transients(smp, tr), tone, sub_bass(smp, sb)))
-    fsz = VW * VH * 3
-    frames, prev, scn = [], None, []
+    fsz = VW * (VH + HH) * 3
+    frames, prev, scn, armed = [], None, [], []
     for k in range(len(v) // fsz):
-        raw = v[k * fsz:(k + 1) * fsz]
+        raw, hud = split_frame(v[k * fsz:(k + 1) * fsz])
+        try:
+            armed.append(core.ammo_hud(hud) if hud is not None else 0)
+        except Exception:
+            armed.append(0)
         m, rd, bl, prev = analyze_video_frame(raw, prev)
         scn.append(scene_frame(raw))
         if k:
@@ -909,6 +946,10 @@ def rate_clip(path, base_game=None, base_motion=None, min_shots=4):
                 boom_video = True
                 break
     score, why = 0.0, []
+    armed_frac = sum(armed) / len(armed) if armed else 0.0
+    if armed_frac >= 0.3:
+        score += 38
+        why.append(f"🔫 Waffe gezogen ({armed_frac * 100:.0f} %) – Kampf/Raub")
     if blocks:
         gs = [b[0] for b in blocks]
         norm = base_game if base_game is not None else _med(gs)
@@ -1006,6 +1047,10 @@ class Detector:
         self.boom_seen = 0.0              # wann zuletzt eine echte Explosion
         self.heist_until = 0.0            # „!raub“ im Chat: bis wann der Raub-Modus läuft
         self.heist_note = None
+        self.hud = deque(maxlen=200)      # (t, 0/1) Munitions-Anzeige oben rechts ~4x pro Sekunde
+        self.fight_seen = 0.0             # wann zuletzt „Waffe gezogen“ (Kampf/Raub, auch ohne Cops)
+        self.fight_since = 0.0            # seit wann der Kampf läuft
+        self.auto_raub = True             # Raub-Modus automatisch (Waffe gezogen) – !raub geht trotzdem
         self.min_shots = 4
         self.norm_game = None      # normales Spiel-dB (für die Spannungs-Bewertung der fertigen Clips)
         self.norm_motion = None
@@ -1062,6 +1107,17 @@ class Detector:
     def add_scene(self, t, red, blue, look):
         with self.lock:
             self.scenes.append((t, red, blue, look))
+
+    def add_hud(self, t, armed):
+        with self.lock:
+            self.hud.append((t, 1 if armed else 0))
+
+    def armed_frac(self, now, secs=30):
+        with self.lock:
+            h = [v for t, v in self.hud if t >= now - secs]
+        if len(h) < secs * 2:  # zu wenig Bilder → nichts sagen
+            return 0.0
+        return sum(h) / len(h)
 
     def add_frame(self, t, motion, red, blue):
         with self.lock:
@@ -1192,9 +1248,18 @@ class Detector:
             if boom_ok:
                 explosion = flash
                 self.boom_seen = now
+        # 🔫 Waffe gezogen (Munitions-Anzeige) über längere Zeit = Kampf/Raub – auch ganz ohne Cops
+        armed = self.armed_frac(now)
+        if armed >= 0.45:
+            if now - self.fight_seen > 90:
+                self.fight_since = now
+            self.fight_seen = now
+        pk_armed = self.peak.get("armed") or 0.0
+        self.peak["armed"] = max(pk_armed, armed)
         cops_ctx = now - self.police_seen < 10
         # Schüsse nur mit Action drumherum (Cops, Bewegung, Explosion) – Schüsse im Hintergrund zählen nicht
-        if shots and not (cops_ctx or (vis or 0) >= 1.3 or flash):
+        fight_ctx = now - self.fight_seen < 20
+        if shots and not (cops_ctx or fight_ctx or (vis or 0) >= 1.3 or flash):
             shots = 0
         # Sirene nur, wenn wirklich was los ist (Cops/Blaulicht/Bewegung) – nicht eine Sirene irgendwo in der Stadt
         if siren and not (cops_ctx or (blue or 0) >= 1.0 or (vis or 0) >= 1.6):
@@ -1281,6 +1346,8 @@ class Detector:
             reasons.append(f"🎬 Action im Bild (×{vis:.1f} Bewegung)")
         if not kind:
             return None
+        if now - self.fight_seen < 60 and not police and self.auto_raub:
+            reasons.insert(0, "🔫 Raub/Kampf (Waffe gezogen)")
         self.last_clip = now
         self.clip_times.append(now)
         if police:
@@ -1377,6 +1444,7 @@ class LiveClipper:
         ar.start()
         vr = VideoReader(channel, det.add_frame, self.stream_stop, self.log)
         vr.on_scene = det.add_scene
+        vr.on_hud = det.add_hud
         self.vr = vr
         vr.start()
         self.log("   💬 lese Chat mit · 🎧 verbinde Live-Ton · 🎥 verbinde Live-Bild …")
@@ -1423,6 +1491,7 @@ class LiveClipper:
                          f"Bild ×{f2(pk.get('vis'))} (ab ×{det.t_vis}) · Schüsse {pk.get('shots') or 0} (ab {det.min_shots})"
                          + (" · 💥 Explosion" if pk.get("boom") else "")
                          + (f" · 🚔 Cops {pk['cops']} s" if pk.get("cops") else "")
+                         + f" · 🔫 Waffe {int(100 * (pk.get('armed') or 0))} % (ab 45 %)"
                          + self._frames_note())
                 det.peak = {"u": 0, "kw": 0, "voice": None, "action": None, "siren": None, "blue": None,
                             "vis": None}
@@ -1747,6 +1816,7 @@ class SelfRecorder(threading.Thread):
         super().__init__(daemon=True)
         self.rect, self.dir, self.stop, self.log = rect, workdir, stop, log
         self.on_frame, self.on_scene = on_frame, on_scene
+        self.on_hud = lambda *a: None
         self.t0 = None
         self.proc = None
         self.audio = AudioLoopback(stop, log)
@@ -1758,7 +1828,7 @@ class SelfRecorder(threading.Thread):
                 "-f", "gdigrab", "-framerate", "30", "-draw_mouse", "0", "-offset_x", str(x), "-offset_y", str(y),
                 "-video_size", f"{w}x{h}", "-i", "desktop",
                 "-filter_complex", f"[0:v]split=2[a][b];[a]scale=-2:'min(1080,ih)',format=yuv420p[hq];"
-                                   f"[b]fps=4,scale={VW}:{VH}[lq]",
+                                   f"[b]{vf_chain('fps=4')}[lq]",
                 "-map", "[hq]", "-c:v", "libx264", "-preset", "superfast", "-crf", "23", "-g", "30",
                 "-f", "segment", "-segment_time", "4", "-reset_timestamps", "1",
                 "-segment_list", "list.csv", "-segment_list_type", "csv", "seg_%06d.mp4",
@@ -1773,7 +1843,7 @@ class SelfRecorder(threading.Thread):
                 pass
         self.audio.start()
         kw = {"creationflags": 0x08000000} if IS_WIN else {}
-        size = VW * VH * 3
+        size = VW * (VH + HH) * 3
         try:
             self.proc = subprocess.Popen(self._cmd(), cwd=self.dir, stdout=subprocess.PIPE,
                                          stderr=subprocess.DEVNULL, stdin=subprocess.PIPE, **kw)
@@ -1787,10 +1857,13 @@ class SelfRecorder(threading.Thread):
                 if self.t0 is None:
                     self.t0 = now - 0.25
                     self.log("   🎥 Nehme das Remote-Play-Fenster selbst auf (ohne OBS) – erkenne Cops/Explosionen")
+                raw, hud = split_frame(raw)
                 motion, red, blue, prev = analyze_video_frame(raw, prev)
                 self.on_frame(now, motion, red, blue)
                 try:
                     self.on_scene(now, *scene_frame(raw))
+                    if hud is not None:
+                        self.on_hud(now, core.ammo_hud(hud))
                 except Exception:
                     pass
                 if now - last_clean > 15:
@@ -1929,6 +2002,7 @@ class RemotePlayClipper(LiveClipper):
             self.log("🎮 PS Remote Play erkannt – ich nehme selbst auf und schaue mit (ohne OBS).")
             self.self_rec = SelfRecorder(self.rect, os.path.join(core.WORK_DIR, "_remoteplay"), det.add_frame,
                                          det.add_scene, self.stream_stop, self.log)
+            self.self_rec.on_hud = det.add_hud
             self.self_rec.start()
         else:
             ok, txt = obs_check(self.st.get("obs_port", 4455), self.st.get("obs_pw", ""))
@@ -1938,6 +2012,7 @@ class RemotePlayClipper(LiveClipper):
             vr = VideoReader("rp", det.add_frame, self.stream_stop, self.log)
             vr.input_args = self._grab_args
             vr.on_scene = det.add_scene
+            vr.on_hud = det.add_hud
             vr.start()
         self.on_state("🎮 Remote Play – 0 Clips")
         threading.Thread(target=self._detect, args=(det, None), daemon=True).start()
@@ -2037,6 +2112,7 @@ class OBSFrameReader(threading.Thread):
     def __init__(self, st, on_frame, on_scene, stop, log):
         super().__init__(daemon=True)
         self.st, self.on_frame, self.on_scene, self.stop, self.log = st, on_frame, on_scene, stop, log
+        self.on_hud = lambda *a: None
 
     def run(self):
         try:
@@ -2056,9 +2132,17 @@ class OBSFrameReader(threading.Thread):
                     src = (self.st.get("cap_source") or "").strip() or \
                         o.call("GetCurrentProgramScene").get("currentProgramSceneName", "")
                     data = o.call("GetSourceScreenshot", {"sourceName": src, "imageFormat": "png",
-                                                          "imageWidth": VW, "imageHeight": VH})
+                                                          "imageWidth": 284, "imageHeight": 160})
                     b64 = data.get("imageData", "").split(",", 1)[-1]
                     img = Image.open(io.BytesIO(base64.b64decode(b64))).convert("RGB")
+                    try:
+                        W_, H_ = img.size
+                        x0, x1, y0, y1 = core.HUD_BOX
+                        hc = img.crop((int(x0 * W_), int(y0 * H_), int(x1 * W_), int(y1 * H_)))
+                        import numpy as np
+                        self.on_hud(time.time(), core.ammo_hud(np.asarray(hc.resize((core.HUD_W, core.HUD_H)))))
+                    except Exception:
+                        pass
                     if img.size != (VW, VH):
                         img = img.resize((VW, VH))
                     raw = img.tobytes()
@@ -2122,7 +2206,9 @@ class CaptureClipper(RemotePlayClipper):
         det = Detector(self.st.get("channel", "x"), self.st.get("keywords", core.DEFAULT_KEYWORDS), "Mittel",
                        cooldown=60, warmup=90)
         self.det = det
-        OBSFrameReader(self.st, det.add_frame, det.add_scene, self.stream_stop, self.log).start()
+        ofr = OBSFrameReader(self.st, det.add_frame, det.add_scene, self.stream_stop, self.log)
+        ofr.on_hud = det.add_hud
+        ofr.start()
         threading.Thread(target=self._detect, args=(det, None), daemon=True).start()
 
     def _end(self):

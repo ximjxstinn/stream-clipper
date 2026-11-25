@@ -1,6 +1,6 @@
 {
-  "version": "4.9",
-  "notes": "Raub-Modus: „!raub“ im Chat → 15 Min. jede Action clippen (auch ohne Cops)",
+  "version": "5.0",
+  "notes": "Raub/Kampf automatisch: Waffe gezogen (Munitions-Anzeige) → Raub-Modus, auch ohne Cops und ohne !raub",
   "files": [
     "StreamClipper.pyw",
     "clipper_core.py",

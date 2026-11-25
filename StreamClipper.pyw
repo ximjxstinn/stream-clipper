@@ -34,7 +34,7 @@ except ImportError:  # ältere Updater kennen live_clipper.py noch nicht → sel
     except Exception:
         live_clipper = None
 
-VERSION = "4.9"
+VERSION = "5.0"
 
 # Fertige Live-Profile für GTA 6 (jederzeit umschaltbar, gilt sofort – auch mitten im Stream)
 _ALL = ("cops", "siren", "shots", "explosion", "bluelight", "vision", "game", "voice", "chat", "clipreq")
@@ -985,6 +985,13 @@ class App:
             vars_[key] = tk.BooleanVar(value=cur.get(key, True))
             ttk.Checkbutton(f, text=name, variable=vars_[key]).grid(row=r, column=0, columnspan=3, sticky="w")
             r += 1
+        v_raub = tk.BooleanVar(value=self.s.get("live_autoraub", True))
+        ttk.Checkbutton(f, text="🔫 Raub/Kampf automatisch erkennen (Waffe gezogen → Raub-Modus, auch ohne Cops)",
+                        variable=v_raub).grid(row=r, column=0, columnspan=3, sticky="w", pady=(4, 0))
+        r += 1
+        ttk.Label(f, text="Chat-Befehl „!raub“ / „!raub aus“ geht zusätzlich weiterhin.", style="Muted.TLabel").grid(
+            row=r, column=0, columnspan=3, sticky="w")
+        r += 1
         ttk.Label(f, text="Wie empfindlich / wie oft?", style="Sec.TLabel").grid(row=r, column=0, columnspan=3,
                                                                                   sticky="w", pady=(12, 6))
         r += 1
@@ -1091,6 +1098,7 @@ class App:
             self.s["live_shots"] = gi("live_shots", 4)
             self.s["live_chase"] = gi("live_chase", 3)
             self.s["live_rate"] = bool(v_rate.get())
+            self.s["live_autoraub"] = bool(v_raub.get())
             self.s["live_rate_min"] = max(0, min(100, gi("live_rate_min", 35)))
             self.s["live_drop"] = next((k for k, t in drops.items() if t == v_drop.get()), "keep")
             self.s["live_auto"] = next((k for k, t in autos.items() if t == v_auto.get()), "approve")

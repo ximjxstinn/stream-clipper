@@ -14,6 +14,18 @@ SO GEHT'S
   4. "Ausgewählte clippen" oder "Alle clippen"
   Oder einfach "Alles automatisch" = analysieren + alle Top-Clips schneiden.
 
+NEU IN 5.0 – 🔫 RAUB/KAMPF AUTOMATISCH ERKANNT (OHNE BEFEHL)
+  - Die App erkennt jetzt selbst, wenn du eine Waffe gezogen hast: oben rechts erscheint die Munitions-
+    Anzeige (z. B. „30 240“). Ist sie über eine halbe Minute meistens da → automatisch Raub-Modus:
+    clippt jede Action – auch OHNE Cops (Banküberfall, Schießerei, Drogen klauen mit Wachen usw.).
+  - Endet von selbst ca. 1 Min. nachdem du die Waffe wegsteckst. Geld-Anzeige/Karte lösen es NICHT aus.
+  - Getestet an deinem Banküberfall (VOD vom 23.11.): Raub-Modus ab 1:16:52, ~26 Clips bis 1:33.
+    Vorher kamen erst Clips, als die Cops da waren (ab 1:23).
+  - Spannungs-Check: Clips mit gezogener Waffe bekommen +38 Punkte, werden also nicht mehr aussortiert.
+  - Ein-/Ausschalten: „⚙ Live-Auslöser einstellen“ → „🔫 Raub/Kampf automatisch erkennen“.
+  - „!raub“ / „!raub aus“ im Chat geht weiterhin zusätzlich (z. B. für Diebstahl ganz ohne Waffe).
+  - Im Log pro Minute: „🔫 Waffe NN %“ (ab 45 % schaltet es um).
+
 NEU IN 4.9 – 💰 RAUB-MODUS PER CHAT („!raub“)
   - Schreib im Twitch-Chat „!raub“ (oder „!überfall“, „!heist“, „!einbruch“) → 15 Min. Raub-Modus:
     clippt jede Action – auch OHNE Cops: Schüsse ab 3, viel Bewegung/Hektik im Bild, Explosionen, Cops.

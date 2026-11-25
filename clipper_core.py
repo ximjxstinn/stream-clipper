@@ -469,6 +469,53 @@ def frame_look(pixels):
     return (r * 77 + g * 150 + b * 29) / 256, r - b, sat, white
 
 
+# 🔫 Waffen-Anzeige oben rechts (Munition „30 240“ + Waffen-Symbol) = du hast eine Waffe gezogen → Kampf/Raub
+HUD_BOX = (0.789, 1.0, 0.0, 0.25)   # oben rechts (x0, x1, y0, y1) als Anteil vom Bild
+HUD_W, HUD_H = 60, 40               # so groß wird der Ausschnitt ausgewertet
+
+
+def ammo_hud(crop):
+    """crop: HUD_H x HUD_W x 3 (numpy, uint8/int). 1 = Munitions-Zahlen sichtbar (Waffe in der Hand), sonst 0."""
+    import numpy as np
+    fr = np.asarray(crop, dtype=np.int16).reshape(HUD_H, HUD_W, 3)
+    mx = fr.max(2)
+    mn = fr.min(2)
+    br = (mx > 135) & (mx - mn < 60)   # helle, graue/weiße Schrift
+    for r in range(3, 24):
+        band = br[r:r + 3, 34:59]
+        n = int(band.sum())
+        if n < 4 or n > 40:
+            continue
+        if br[max(0, r - 2):r, 34:59].sum() > 3 or br[r + 3:r + 5, 34:59].sum() > 6:
+            continue  # Zahlen stehen frei (kein heller Himmel/Wand)
+        idx = np.where(band.any(0))[0]
+        L, R = int(idx[0]), int(idx[-1])
+        if R < 17 or R - L < 8 or R - L > 20:
+            continue  # rechtsbündig, zwei Zahlen breit
+        cols = band.any(0)[L:R + 1]
+        run = gaps = 0
+        for c in cols:
+            run = 0 if c else run + 1
+            if run == 2:
+                gaps += 1
+        if gaps < 1:
+            continue  # Lücke zwischen Magazin und Reserve
+        if mx[r:r + 3, 34:59][~band].mean() > 110:
+            continue
+        win = fr[max(0, r - 1):r + 4, 34 + L:34 + R + 1]
+        if ((win[..., 0] > 100) & (win[..., 0] - np.maximum(win[..., 1], win[..., 2]) > 50)).sum() >= 3:
+            continue  # rot-weiße Status-Symbole (Fahndung o. ä.), keine Zahlen
+        if br[r:r + 3, 24:34].sum() > 2:
+            continue  # Text läuft nach links weiter = Geld-Anzeige ($208,139), keine Munition
+        up = br[max(0, r - 6):max(0, r - 1), 24:59]
+        if up.any():
+            ui = np.where(up.any(0))[0]
+            if ui[-1] - ui[0] > 9 and up.sum() >= 6:
+                continue  # zweite Textzeile direkt darüber = Geld (Bargeld + Bank), keine Munition
+        return 1
+    return 0
+
+
 def flash_score(looks):
     """Explosion im Bild: in ≤0,75 s deutlich heller, ORANGE (warm + farbig) und nicht weiß überstrahlt.
     looks: frame_look()-Werte der letzten ~2 s (4 pro Sekunde). Weiße Überblendungen (Figurwechsel,
