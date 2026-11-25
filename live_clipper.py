@@ -683,7 +683,7 @@ AUTO_MODES = {
     "normal": (("cops", "explosion", "shots", "siren", "bluelight", "clipreq"), 60, 30, 4, 3),
     "ruhig": (("cops", "explosion", "clipreq"), 120, 10, 8, 1),
     # Per Chat-Befehl „!raub“: Raub/Schießerei OHNE Cops – dann zählt auch viel Action im Bild
-    "raub": (("cops", "explosion", "shots", "siren", "bluelight", "vision", "clipreq"), 35, 80, 3, 6),
+    "raub": (("cops", "explosion", "shots", "siren", "bluelight", "vision", "clipreq"), 90, 20, 3, 6),
 }
 AUTO_NAMES = {"action": "💰 Action-Modus (Cops/Explosionen gerade eben)",
               "normal": "🎮 Normal-Modus", "ruhig": "😎 Ruhig-Modus (lange nichts los)",
@@ -735,7 +735,7 @@ def apply_settings(det, st, now):
         det.enabled = {k: (k in trigs) for k in TRIGGERS}
         det.cooldown, det.max_per_hour, det.min_shots, det.max_chase = gap, hour, shots_n, chase
         if mode == "raub":
-            det.t_vis = min(det.t_vis, 1.5)  # beim Raub reicht schon deutlich mehr Bewegung als sonst
+            det.t_vis = min(det.t_vis, 2.0)  # beim Raub reicht schon deutlich mehr Bewegung als sonst
     if not st.get("vis", True):
         det.enabled["vision"] = det.enabled["bluelight"] = False
     return mode
@@ -951,7 +951,7 @@ def rate_clip(path, base_game=None, base_motion=None, min_shots=4):
     score, why = 0.0, []
     armed_frac = sum(armed) / len(armed) if armed else 0.0
     if armed_frac >= 0.3:
-        score += 38
+        score += 33  # allein reicht das nicht (unter 35) – es muss auch was passieren (Schüsse, Bewegung, Lärm)
         why.append(f"🔫 Waffe gezogen ({armed_frac * 100:.0f} %) – Kampf/Raub")
     if blocks:
         gs = [b[0] for b in blocks]
@@ -1053,6 +1053,8 @@ class Detector:
         self.hud = deque(maxlen=200)      # (t, 0/1) Munitions-Anzeige oben rechts ~4x pro Sekunde
         self.fight_seen = 0.0             # wann zuletzt „Waffe gezogen“ (Kampf/Raub, auch ohne Cops)
         self.fight_since = 0.0            # seit wann der Kampf läuft
+        self.fight_clips = 0              # Clips im aktuellen Kampf (nur „Waffe + Bewegung“)
+        self.max_fight = 3                # höchstens so viele reine Bewegungs-Clips pro Kampf/Raub
         self.auto_raub = True             # Raub-Modus automatisch (Waffe gezogen) – !raub geht trotzdem
         self.min_shots = 4
         self.norm_game = None      # normales Spiel-dB (für die Spannungs-Bewertung der fertigen Clips)
@@ -1256,6 +1258,7 @@ class Detector:
         if armed >= ARMED_ON:
             if now - self.fight_seen > 90:
                 self.fight_since = now
+                self.fight_clips = 0  # neuer Kampf/Raub
             self.fight_seen = now
         pk_armed = self.peak.get("armed") or 0.0
         self.peak["armed"] = max(pk_armed, armed)
@@ -1272,6 +1275,7 @@ class Detector:
         if shots >= 3 and self.auto_raub:
             if now - self.fight_seen > 90:
                 self.fight_since = now
+                self.fight_clips = 0
             self.fight_seen = now
         # Messwerte fürs Log (Maximum pro Minute)
         pk = self.peak
@@ -1355,6 +1359,12 @@ class Detector:
             reasons.append(f"🎬 Action im Bild (×{vis:.1f} Bewegung)")
         if not kind:
             return None
+        fight_only = (now - self.fight_seen < 60 and self.auto_raub and kind == "vision"
+                      and getattr(self, "heist_until", 0) <= now)
+        if fight_only:
+            if self.fight_clips >= self.max_fight:
+                return None  # genug reine „Waffe + Bewegung“-Clips von diesem Kampf – nur noch Schüsse/Cops/Boom
+            self.fight_clips += 1
         if now - self.fight_seen < 60 and not police and self.auto_raub:
             reasons.insert(0, "🔫 Raub/Kampf (Waffe gezogen)")
         self.last_clip = now

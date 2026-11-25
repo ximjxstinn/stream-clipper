@@ -14,6 +14,15 @@ SO GEHT'S
   4. "Ausgewählte clippen" oder "Alle clippen"
   Oder einfach "Alles automatisch" = analysieren + alle Top-Clips schneiden.
 
+NEU IN 5.4 – 🔫 WENIGER „WAFFE GEZOGEN“-CLIPS
+  - Pro Kampf/Raub höchstens 3 Clips nur wegen „Waffe + Bewegung“. Danach nur noch bei echten Schüssen,
+    Cops, Explosionen oder wenn jemand „clip“ schreibt.
+  - Raub-Modus: mind. 90 Sek. zwischen Clips (vorher 35), höchstens 20 pro Stunde (vorher 80),
+    es braucht deutlich mehr Bewegung (×2,0 statt ×1,5).
+  - Spannungs-Check: „Waffe gezogen“ allein reicht nicht mehr – es muss auch was passieren.
+  - Test mit deinem Banküberfall-Stream: 20 statt 58 Clips, davon 10 im Raub (inkl. Cops + Explosion).
+  - „!raub“ im Chat geht weiter ohne diese 3er-Grenze (dann willst du ja alles).
+
 NEU IN 5.3 – 🔫 RAUB-MODUS SCHALTET SCHNELLER UM
   - Schon ab 30 % (statt 45 %) sichtbarer Munitions-Anzeige in der letzten halben Minute → Raub-Modus.
   - Zusätzlich: mehrere echte Schüsse (ab 3, mit Action im Bild) schalten sofort in den Raub-Modus.

@@ -1,6 +1,6 @@
 {
-  "version": "5.3",
-  "notes": "Raub-Modus schaltet schneller um (Waffe ab 30 % oder mehrere Schüsse)",
+  "version": "5.4",
+  "notes": "Weniger Waffe-gezogen-Clips: max. 3 pro Kampf, 90 s Abstand, max. 20/Std.",
   "files": [
     "StreamClipper.pyw",
     "clipper_core.py",
