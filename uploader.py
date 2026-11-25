@@ -472,3 +472,43 @@ def tt_upload(conf, path, caption, log=print, cancel=None, post=None):
         if s == "FAILED":
             raise UploadError(f"TikTok hat das Video abgelehnt: {st.get('fail_reason', '?')}")
     return pid, "PROCESSING"
+
+
+# --------------------------------------------------------------------------- #
+#  TikTok-Limit: höchstens 5 offene Entwürfe pro 24 Stunden (TikTok-Regel für ungeprüfte Apps/Entwürfe)
+# --------------------------------------------------------------------------- #
+TT_DRAFT_CAP = 5
+
+
+def tt_slots_left(conf=None):
+    """Wie viele Entwürfe heute noch zu TikTok dürfen (rollierend 24 h)."""
+    conf = conf or load_conf()
+    now = time.time()
+    hist = [t for t in conf.get("tt_hist", []) if now - t < 24 * 3600]
+    return max(0, TT_DRAFT_CAP - len(hist)), hist
+
+
+def tt_note_upload():
+    c = load_conf()
+    _, hist = tt_slots_left(c)
+    hist.append(time.time())
+    c["tt_hist"] = hist
+    save_conf(c)
+
+
+def tt_block_until_tomorrow():
+    """TikTok hat „zu viele offene Entwürfe“ gemeldet → Zähler voll machen."""
+    c = load_conf()
+    _, hist = tt_slots_left(c)
+    while len(hist) < TT_DRAFT_CAP:
+        hist.append(time.time())
+    c["tt_hist"] = hist
+    save_conf(c)
+
+
+def tt_next_free(conf=None):
+    """Wann wieder ein Platz frei wird (Unix-Zeit) oder None."""
+    left, hist = tt_slots_left(conf)
+    if left or not hist:
+        return None
+    return min(hist) + 24 * 3600

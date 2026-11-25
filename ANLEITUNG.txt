@@ -14,6 +14,18 @@ SO GEHT'S
   4. "Ausgewählte clippen" oder "Alle clippen"
   Oder einfach "Alles automatisch" = analysieren + alle Top-Clips schneiden.
 
+NEU IN 5.2 – ♪ TIKTOK-ENTWÜRFE: WO SIE SIND + TAGESLIMIT
+  - TikTok-Entwürfe landen NICHT unter „Entwürfe“, sondern als BENACHRICHTIGUNG in der TikTok-App:
+    Posteingang (Inbox) → „Dein Video von Stream Clipper ist bereit“ antippen → bearbeiten → posten
+    (oder dort als Entwurf speichern). Erst dann stehen sie bei deinen Entwürfen.
+  - TikTok erlaubt höchstens 5 offene Entwürfe pro 24 Std. Alles darüber hat TikTok bisher still verworfen.
+    Jetzt zählt die App mit: Clips über dem Limit warten (⏳ in der Liste) und werden automatisch nachgeladen,
+    sobald wieder Platz ist – die spannendsten zuerst.
+  - Live gehen nur Top-Clips (ab 50 Spannungs-Punkten) sofort zu TikTok, damit die 5 Plätze nicht für
+    mittelmäßige Clips draufgehen. Nach dem Stream werden freie Plätze mit den besten restlichen gefüllt.
+    YouTube bekommt weiterhin alle.
+  - Ohne Limit geht es erst, wenn TikTok deine App geprüft hat (dann direkt posten statt Entwurf).
+
 NEU IN 5.1 – 🌴 VICE-CITY-EDIT FÜR TIKTOK
   - Haken „🌴 Vice-City-Edit für TikTok“ (links unter TikTok-Stil) → jeder Hochkant-Clip bekommt:
     🎨 Neon-Look (Pink/Türkis, kräftige Farben, Vignette, Blitz bei Explosionen)

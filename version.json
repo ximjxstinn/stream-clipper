@@ -1,6 +1,6 @@
 {
-  "version": "5.1",
-  "notes": "Vice-City-Edit für TikTok (Neon-Look, Autocut-Zooms, Titel, Musik) + Raub automatisch + Modus-Schild",
+  "version": "5.2",
+  "notes": "TikTok: 5-Entwürfe-Limit beachten, wartende Clips automatisch nachladen (beste zuerst) + Vice-City-Edit",
   "files": [
     "StreamClipper.pyw",
     "clipper_core.py",

@@ -34,7 +34,7 @@ except ImportError:  # ältere Updater kennen live_clipper.py noch nicht → sel
     except Exception:
         live_clipper = None
 
-VERSION = "5.1"
+VERSION = "5.2"
 
 # Fertige Live-Profile für GTA 6 (jederzeit umschaltbar, gilt sofort – auch mitten im Stream)
 _ALL = ("cops", "siren", "shots", "explosion", "bluelight", "vision", "game", "voice", "chat", "clipreq")
@@ -201,6 +201,7 @@ class App:
         self._build()
         self.root.after(100, self._poll)
         self.root.after(400, self._restore_last)
+        self.root.after(3 * 60 * 1000, self._tt_backfill_timer)  # wartende TikTok-Entwürfe nachladen
         if self.s.get("autoupdate", True):
             self.root.after(2500, lambda: self.check_updates(silent=True))
         self.live = None
@@ -763,7 +764,8 @@ class App:
     def _status_text(self, h):
         up = h.get("uploaded") or {}
         if up:
-            return "⬆ hochgeladen (" + " + ".join({"yt": "YouTube", "tt": "TikTok"}[p] for p in up) + ")"
+            return ("⬆ hochgeladen (" + " + ".join({"yt": "YouTube", "tt": "TikTok-Entwurf"}[p] for p in up) + ")"
+                    + (" · ⏳ TikTok wartet (Limit)" if h.get("tt_wait") and "tt" not in up else ""))
         qc = h.get("qc")
         th = h.get("thrill") or {}
         if h.get("dropped"):
@@ -1608,7 +1610,38 @@ class App:
             threading.Thread(target=lambda: self._auto_upload(src, [(i, h)], direct=False, force=True),
                              daemon=True).start()
 
+    def _tt_backfill(self, reason=""):
+        """Wartende TikTok-Clips nachladen, sobald wieder Plätze frei sind – die spannendsten zuerst."""
+        try:
+            if not uploader or not self.meta or not self.highlights:
+                return
+            conf = uploader.load_conf()
+            if not conf.get("tt_auto") or not conf.get("tt_token"):
+                return
+            if getattr(self, "live", None) and self.live.stream_stop:
+                return  # während des Streams nicht – erst danach die besten
+            left, _ = uploader.tt_slots_left(conf)
+            if left <= 0:
+                return
+            wait = [(i, h) for i, h in enumerate(self.highlights)
+                    if h.get("tt_wait") and not (h.get("uploaded") or {}).get("tt") and not h.get("boring")
+                    and not h.get("dropped") and (h.get("qc") or {}).get("ok", True) and h.get("files")]
+            if not wait:
+                return
+            wait.sort(key=lambda x: -((x[1].get("thrill") or {}).get("score", 0) * 10 + x[1].get("score", 0)))
+            pick = wait[:left]
+            self.log(f"♪ TikTok: {len(pick)} wartende(r) Clip(s) werden jetzt nachgeladen{reason} – die spannendsten "
+                     f"zuerst ({len(wait) - len(pick)} warten noch).")
+            self._queue_upload(dict(self.meta), pick, ["tt"])
+        except Exception as e:
+            self.log(f"⚠ TikTok-Nachladen: {e}")
+
+    def _tt_backfill_timer(self):
+        self._tt_backfill()
+        self.root.after(20 * 60 * 1000, self._tt_backfill_timer)
+
     def _live_stream_ended(self, stream):
+        self.root.after(5 * 60 * 1000, lambda: self._tt_backfill(" (Stream vorbei)"))
         if not (self.meta and self.meta.get("kind") == "live" and self.highlights):
             return
         items = list(enumerate(self.highlights))
@@ -2809,9 +2842,42 @@ class App:
                             note = " (noch privat – Google schaltet öffentlich erst nach der API-Prüfung frei)"
                         self.log(f"   ✅ https://youtu.be/{vid}{note}")
                     else:
-                        self.log(f"♪ TikTok: lade #{i + 1} hoch …")
+                        left, _ = uploader.tt_slots_left()
+                        th = (h.get("thrill") or {}).get("score")
+                        streaming = bool(getattr(self, "live", None) and self.live.stream_stop)
+                        tt_min = int(conf.get("tt_min", 50))
+                        if left > 0 and h.get("live") and streaming and th is not None and th < tt_min:
+                            h["tt_wait"] = True
+                            self.ui(lambda i=i: self._refresh_row(i))
+                            self.log(f"   ⏳ TikTok: #{i + 1} ({th}/100) hebe ich auf – nur {uploader.TT_DRAFT_CAP} "
+                                     f"Entwürfe pro Tag, live gehen nur Top-Clips ab {tt_min} Punkten sofort raus. "
+                                     "Nach dem Stream kommen die besten restlichen dazu.")
+                            continue
+                        if left <= 0:
+                            h["tt_wait"] = True
+                            nxt = uploader.tt_next_free()
+                            self.ui(lambda i=i: self._refresh_row(i))
+                            self.log(f"   ⏳ TikTok: #{i + 1} wartet – TikTok erlaubt nur {uploader.TT_DRAFT_CAP} Entwürfe "
+                                     f"pro 24 Std. Nächster Platz frei ab "
+                                     f"{time.strftime('%d.%m. %H:%M', time.localtime(nxt)) if nxt else 'bald'} "
+                                     "(die App lädt ihn dann automatisch nach).")
+                            continue
+                        self.log(f"♪ TikTok: lade #{i + 1} hoch … (heute noch {left - 1} frei)")
                         tags = " ".join(t for t in tags.split() if t.lower() != "#shorts")
-                        pid, status = uploader.tt_upload(conf, path, f"{title} {tags}", self.log, cancel)
+                        try:
+                            pid, status = uploader.tt_upload(conf, path, f"{title} {tags}", self.log, cancel)
+                        except uploader.TikTokError as te:
+                            if te.code in ("spam_risk_too_many_pending_share", "spam_risk_too_many_posts"):
+                                uploader.tt_block_until_tomorrow()
+                                h["tt_wait"] = True
+                                self.ui(lambda i=i: self._refresh_row(i))
+                                self.log(f"   ⏳ TikTok sagt: zu viele offene Entwürfe. #{i + 1} wartet. Tipp: öffne in "
+                                         "der TikTok-App deine Benachrichtigungen und poste/lösche die offenen "
+                                         "Entwürfe – dann wird wieder Platz frei.")
+                                continue
+                            raise
+                        uploader.tt_note_upload()
+                        h.pop("tt_wait", None)
                         up["tt"] = pid
                         self.log("   ✅ " + ("In deiner TikTok-App als Entwurf – Benachrichtigung öffnen und posten!"
                                            if status == "SEND_TO_USER_INBOX" else f"Gepostet ({status})"))
