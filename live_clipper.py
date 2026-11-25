@@ -657,12 +657,17 @@ AUTO_MODES = {
     "action": (("cops", "explosion", "shots", "siren", "bluelight", "clipreq"), 40, 60, 3, 6),
     "normal": (("cops", "explosion", "shots", "siren", "bluelight", "clipreq"), 60, 30, 4, 3),
     "ruhig": (("cops", "explosion", "clipreq"), 120, 10, 8, 1),
+    # Per Chat-Befehl „!raub“: Raub/Schießerei OHNE Cops – dann zählt auch viel Action im Bild
+    "raub": (("cops", "explosion", "shots", "siren", "bluelight", "vision", "clipreq"), 35, 80, 3, 6),
 }
 AUTO_NAMES = {"action": "💰 Action-Modus (Cops/Explosionen gerade eben)",
-              "normal": "🎮 Normal-Modus", "ruhig": "😎 Ruhig-Modus (lange nichts los)"}
+              "normal": "🎮 Normal-Modus", "ruhig": "😎 Ruhig-Modus (lange nichts los)",
+              "raub": "💰🔫 Raub-Modus (per !raub – clippt jede Action, auch ohne Cops)"}
 
 
 def auto_mode(det, now):
+    if getattr(det, "heist_until", 0) > now:
+        return "raub"
     last = max(det.police_seen, det.boom_seen)
     if last and now - last < 180:
         return "action"
@@ -687,11 +692,16 @@ def apply_settings(det, st, now):
     sens = SENSITIVITY.get(st.get("live_sens", "Mittel"), SENSITIVITY["Mittel"])
     det.t_chat, det.min_people = sens[0], sens[3]
     mode = None
-    if st.get("live_autoprof"):
+    if getattr(det, "heist_until", 0) > now:
+        mode = "raub"
+    elif st.get("live_autoprof"):
         mode = auto_mode(det, now)
+    if mode:
         trigs, gap, hour, shots_n, chase = AUTO_MODES[mode]
         det.enabled = {k: (k in trigs) for k in TRIGGERS}
         det.cooldown, det.max_per_hour, det.min_shots, det.max_chase = gap, hour, shots_n, chase
+        if mode == "raub":
+            det.t_vis = min(det.t_vis, 1.5)  # beim Raub reicht schon deutlich mehr Bewegung als sonst
     if not st.get("vis", True):
         det.enabled["vision"] = det.enabled["bluelight"] = False
     return mode
@@ -994,6 +1004,8 @@ class Detector:
         self.chase_clips = 0
         self.max_chase = 3                # höchstens so viele Clips pro Verfolgung
         self.boom_seen = 0.0              # wann zuletzt eine echte Explosion
+        self.heist_until = 0.0            # „!raub“ im Chat: bis wann der Raub-Modus läuft
+        self.heist_note = None
         self.min_shots = 4
         self.norm_game = None      # normales Spiel-dB (für die Spannungs-Bewertung der fertigen Clips)
         self.norm_motion = None
@@ -1012,9 +1024,24 @@ class Detector:
         self.t_vis = 1.6 if sensitivity == MAXIMAL else 2.0
         self.lock = threading.Lock()
 
+    HEIST_ON = re.compile(r"^!(raub|überfall|ueberfall|heist|einbruch)\b(?!\s*(aus|stop|ende|off))", re.I)
+    HEIST_OFF = re.compile(r"^!(raub|überfall|ueberfall|heist|einbruch)\s*(aus|stop|ende|off)\b|^!raubende\b", re.I)
+
     def add_msg(self, t, user, text):
         low = text.lower().strip()
         is_bot = user in core.BOTS or user.endswith("bot")
+        if user == self.streamer:
+            # Du selbst: „!raub“ → 15 Min. Raub-Modus (clippt jede Action), „!raub aus“ → zurück
+            if self.HEIST_OFF.match(low):
+                self.heist_until = 0
+                self.heist_note = "off"
+            elif self.HEIST_ON.match(low):
+                mins = 15
+                m = re.search(r"(\d+)", low)
+                if m:
+                    mins = max(1, min(60, int(m.group(1))))
+                self.heist_until = t + mins * 60
+                self.heist_note = f"on:{mins}"
         with self.lock:
             if not is_bot and CLIP_REQ.search(low):
                 self.clipreq.append((t, user))
@@ -1372,6 +1399,13 @@ class LiveClipper:
         next_report = time.time() + 60
         while stop and not stop.is_set():
             stop.wait(1)
+            note, det.heist_note = det.heist_note, None
+            if note == "off":
+                self.log("💰 Raub-Modus beendet (!raub aus) – zurück zum normalen Profil.")
+            elif note:
+                self.log(f"💰🔫 RAUB-MODUS an für {note.split(':')[1]} Min. – jede Action wird geclippt "
+                         "(Schüsse ab 3, viel Bewegung, Cops, Explosionen). Beenden: „!raub aus“")
+                self.notify("💰 Raub-Modus an", f"{note.split(':')[1]} Minuten – jede Action wird geclippt")
             mode = apply_settings(det, self.st, time.time())
             if mode and mode != getattr(self, "_auto_mode", None):
                 self._auto_mode = mode

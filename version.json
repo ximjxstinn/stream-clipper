@@ -1,6 +1,6 @@
 {
-  "version": "4.8.3",
-  "notes": "Fix: Live-Bild beim PS5-Stream lieferte zu wenige Bilder – jetzt gleichmäßig ~4 pro Sekunde",
+  "version": "4.9",
+  "notes": "Raub-Modus: „!raub“ im Chat → 15 Min. jede Action clippen (auch ohne Cops)",
   "files": [
     "StreamClipper.pyw",
     "clipper_core.py",

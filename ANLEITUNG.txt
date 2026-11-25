@@ -14,6 +14,13 @@ SO GEHT'S
   4. "Ausgewählte clippen" oder "Alle clippen"
   Oder einfach "Alles automatisch" = analysieren + alle Top-Clips schneiden.
 
+NEU IN 4.9 – 💰 RAUB-MODUS PER CHAT („!raub“)
+  - Schreib im Twitch-Chat „!raub“ (oder „!überfall“, „!heist“, „!einbruch“) → 15 Min. Raub-Modus:
+    clippt jede Action – auch OHNE Cops: Schüsse ab 3, viel Bewegung/Hektik im Bild, Explosionen, Cops.
+    Alle 35 Sek. möglich, bis 80 Clips/Std.  „!raub 30“ = 30 Minuten.  „!raub aus“ = sofort beenden.
+  - Funktioniert nur, wenn DU es schreibst (nicht Zuschauer). Geht auch vom Handy aus.
+  - Danach geht es automatisch zurück zum normalen (Auto-)Profil.
+
 NEU IN 4.8.2 – FIX: LIVE-BILD BEIM PS5-STREAM
   - Beim PS5-Stream lieferte Twitch Zeitsprünge → ffmpeg spuckte tausende doppelte Bilder aus und hing danach.
     Jetzt: Einstieg am Live-Ende, Zeitstempel nach Uhrzeit, höchstens ~5 Bilder/Sek. werden ausgewertet.
