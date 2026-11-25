@@ -262,6 +262,11 @@ class App:
         ttk.Label(top, text="✂ Stream Clipper", style="Head.TLabel").pack(side="left")
         ttk.Label(top, text="   findet automatisch die besten Stellen in deinen Streams",
                   style="Sub.TLabel").pack(side="left", pady=(8, 0))
+        # Großes Modus-Schild oben rechts: sieht man sofort, was der Live-Clipper gerade macht
+        self.mode_badge = tk.Label(top, text="", font=("Segoe UI", 15, "bold"), bg=BG, fg=TEXT,
+                                   padx=16, pady=6)
+        self.mode_badge.pack(side="right")
+        self._modes = {}
 
         body = ttk.Frame(self.root, padding=(16, 6))
         body.pack(fill="both", expand=True)
@@ -449,6 +454,10 @@ class App:
         ttk.Label(left, text="Status:", style="Panel.TLabel").grid(row=r, column=0, sticky="w")
         ttk.Label(left, textvariable=self.v_live_state, style="Muted.TLabel").grid(row=r, column=1, columnspan=2,
                                                                                     sticky="w")
+        r += 1
+        self.mode_badge2 = tk.Label(left, text="", font=("Segoe UI", 12, "bold"), bg=PANEL, fg=TEXT, padx=10, pady=4)
+        self.mode_badge2.grid(row=r, column=0, columnspan=3, sticky="we", pady=(4, 2))
+        self.mode_badge2.grid_remove()
         r += 1
         # Empfindlichkeit kommt jetzt aus „Modus“ oben (gilt für VOD + live)
         self.v_live_sens = tk.StringVar(value=s.get("live_sens", "Mittel"))
@@ -967,6 +976,44 @@ class App:
             self.v_live_profile.set(CUSTOM_PROFILE)
             self.save()
 
+    MODE_LOOK = {  # modus: (text, hintergrund, schrift)
+        "raub": ("💰🔫  RAUB-MODUS  –  clippt jede Action", "#e91916", "#ffffff"),
+        "action": ("🚔💥  ACTION-MODUS  –  Cops/Explosion", "#ff8c00", "#000000"),
+        "normal": ("🎮  NORMAL-MODUS", "#9147ff", "#ffffff"),
+        "ruhig": ("😎  RUHIG-MODUS  –  nur Krasses", "#3a3a44", "#efeff1"),
+        "manuell": ("⚙  EIGENES PROFIL", "#26262c", "#efeff1"),
+    }
+
+    def _show_mode(self, src, mode):
+        """src: live / rp / cap. Zeigt den aktiven Modus groß oben rechts (und im Live-Bereich)."""
+        self._modes[src] = mode
+        prio = ["raub", "action", "normal", "ruhig", "manuell"]
+        act = [m for m in self._modes.values() if m]
+        if not act:
+            self._shown_mode = None
+            self.mode_badge.config(text="", bg=BG)
+            self.mode_badge2.grid_remove()
+            return
+        m = min(act, key=lambda x: prio.index(x) if x in prio else 99)
+        txt, bg, fg = self.MODE_LOOK.get(m, (m, ACCENT, TEXT))
+        self.mode_badge.config(text=txt, bg=bg, fg=fg)
+        self.mode_badge2.config(text=txt, bg=bg, fg=fg)
+        self.mode_badge2.grid()
+        if getattr(self, "_shown_mode", None) != m:
+            self._shown_mode = m
+            self._blink_mode(m, 6)
+
+    def _blink_mode(self, m, n):
+        """Kurz blinken, wenn der Modus wechselt – damit man es merkt."""
+        if getattr(self, "_shown_mode", None) != m:
+            return
+        _, bg, fg = self.MODE_LOOK.get(m, ("", ACCENT, TEXT))
+        on = n <= 0 or n % 2 == 0
+        for b in (self.mode_badge, self.mode_badge2):
+            b.config(bg=bg if on else fg, fg=fg if on else bg)
+        if n > 0:
+            self.root.after(350, lambda: self._blink_mode(m, n - 1))
+
     def live_trigger_settings(self):
         trig_names = live_clipper.TRIGGERS if live_clipper else {}
         cur = dict(self.s.get("live_trig") or {})
@@ -1247,6 +1294,7 @@ class App:
         if self.cap:
             self.cap.stop()
             self.cap = None
+            self._show_mode("cap", None)
         if not on:
             self.v_cap_state.set("aus")
             return
@@ -1264,6 +1312,7 @@ class App:
                 notify=self.notify,
                 is_live=lambda: bool(self.live and self.live.stream_stop))
             self.cap.on_end = lambda stream: self.ui(lambda: self._live_stream_ended(stream))
+            self.cap.on_mode = lambda m: self.ui(lambda: self._show_mode("cap", m))
             self.cap.start()
 
         def threaded_ensure():
@@ -1280,6 +1329,7 @@ class App:
         if self.rp:
             self.rp.stop()
             self.rp = None
+            self._show_mode("rp", None)
         if not on:
             self.v_rp_state.set("aus")
             return
@@ -1303,6 +1353,7 @@ class App:
                 notify=self.notify,
                 is_live=lambda: bool(self.live and self.live.stream_stop))
             self.rp.on_end = lambda stream: self.ui(lambda: self._live_stream_ended(stream))
+            self.rp.on_mode = lambda m: self.ui(lambda: self._show_mode("rp", m))
             self.rp.start()
 
         def threaded_ensure():
@@ -1413,6 +1464,7 @@ class App:
             if self.live:
                 self.live.stop()
                 self.live = None
+                self._show_mode("live", None)
             self.v_live_state.set("aus")
             self.log("Live-Clipper aus.")
             return
@@ -1444,6 +1496,7 @@ class App:
                 on_state=lambda txt: self.ui(lambda: self.v_live_state.set(txt)),
                 notify=self.notify)
             self.live.on_end = lambda stream: self.ui(lambda: self._live_stream_ended(stream))
+            self.live.on_mode = lambda m: self.ui(lambda: self._show_mode("live", m))
             self.live.start()
         threading.Thread(target=threaded_ensure, daemon=True).start()
 

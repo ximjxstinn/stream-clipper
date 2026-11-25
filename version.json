@@ -1,6 +1,6 @@
 {
   "version": "5.0",
-  "notes": "Raub/Kampf automatisch: Waffe gezogen (Munitions-Anzeige) → Raub-Modus, auch ohne Cops und ohne !raub",
+  "notes": "Raub/Kampf automatisch (Waffe gezogen → Raub-Modus, ohne !raub) + großes farbiges Modus-Schild oben rechts",
   "files": [
     "StreamClipper.pyw",
     "clipper_core.py",

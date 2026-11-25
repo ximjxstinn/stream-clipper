@@ -1369,6 +1369,7 @@ class LiveClipper:
     def __init__(self, twitch, settings, log, on_clip, on_state, notify):
         self.tw, self.st, self.log = twitch, settings, log
         self.on_clip, self.on_state, self.notify = on_clip, on_state, notify
+        self.on_mode = lambda mode: None   # großes Modus-Schild in der App (raub/action/normal/ruhig/manuell/None)
         self.stop_all = threading.Event()
         self.stream_stop = None
         self.thread = None
@@ -1456,13 +1457,21 @@ class LiveClipper:
         self.log(f"⚫ Stream vorbei – Live-Clipper hat {self.count} Clip(s) erstellt.")
         self.notify("⚫ Stream vorbei", f"{self.count} Live-Clips erstellt – schau sie dir in der App an.")
         self.on_state(f"wartet auf deinen Stream (letzter: {self.count} Clips)")
+        self._set_mode(None)
         try:
             self.on_end(dict(self.stream or {}))
         except Exception:
             pass
 
+    def _set_mode(self, mode):
+        try:
+            self.on_mode(mode)
+        except Exception:
+            pass
+
     def _detect(self, det, uid):
         stop = self.stream_stop
+        self._auto_mode = "?"
         max_clips = int(self.st.get("live_max", 25))
         next_report = time.time() + 60
         while stop and not stop.is_set():
@@ -1475,10 +1484,12 @@ class LiveClipper:
                          "(Schüsse ab 3, viel Bewegung, Cops, Explosionen). Beenden: „!raub aus“")
                 self.notify("💰 Raub-Modus an", f"{note.split(':')[1]} Minuten – jede Action wird geclippt")
             mode = apply_settings(det, self.st, time.time())
-            if mode and mode != getattr(self, "_auto_mode", None):
-                self._auto_mode = mode
-                self.log(f"🤖 Auto-Profil: {AUTO_NAMES[mode]}")
-                self.on_state(f"{self.state_prefix} – {self.count} Clips · {AUTO_NAMES[mode].split(' (')[0]}")
+            if (mode or "manuell") != getattr(self, "_auto_mode", None):
+                self._auto_mode = mode or "manuell"
+                self._set_mode(self._auto_mode)
+                if mode:
+                    self.log(f"🤖 Auto-Profil: {AUTO_NAMES[mode]}")
+                    self.on_state(f"{self.state_prefix} – {self.count} Clips · {AUTO_NAMES[mode].split(' (')[0]}")
             trig = det.tick(time.time())
             if time.time() >= next_report:
                 next_report = time.time() + 60
@@ -2022,6 +2033,7 @@ class RemotePlayClipper(LiveClipper):
         self.stream_stop = None
         self.log(f"⚫ PS Remote Play zu – {self.count} Clip(s) erstellt.")
         self.on_state(f"wartet auf PS Remote Play (letztes Mal: {self.count} Clips)")
+        self._set_mode(None)
         try:
             self.on_end(dict(self.stream or {}))
         except Exception:
@@ -2216,6 +2228,7 @@ class CaptureClipper(RemotePlayClipper):
         self.stream_stop = None
         self.log(f"⚫ Capture-Clipper pausiert – {self.count} Clip(s) erstellt.")
         self.on_state(f"wartet auf OBS (letztes Mal: {self.count} Clips)")
+        self._set_mode(None)
         try:
             self.on_end(dict(self.stream or {}))
         except Exception:

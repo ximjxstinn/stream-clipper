@@ -25,6 +25,8 @@ NEU IN 5.0 – 🔫 RAUB/KAMPF AUTOMATISCH ERKANNT (OHNE BEFEHL)
   - Ein-/Ausschalten: „⚙ Live-Auslöser einstellen“ → „🔫 Raub/Kampf automatisch erkennen“.
   - „!raub“ / „!raub aus“ im Chat geht weiterhin zusätzlich (z. B. für Diebstahl ganz ohne Waffe).
   - Im Log pro Minute: „🔫 Waffe NN %“ (ab 45 % schaltet es um).
+  - 🪧 MODUS-SCHILD: oben rechts in der App steht jetzt groß und farbig, welcher Modus gerade läuft
+    (🔴 RAUB · 🟠 ACTION · 🟣 NORMAL · ⚫ RUHIG) – blinkt kurz, wenn er wechselt. Auch im Live-Bereich links.
 
 NEU IN 4.9 – 💰 RAUB-MODUS PER CHAT („!raub“)
   - Schreib im Twitch-Chat „!raub“ (oder „!überfall“, „!heist“, „!einbruch“) → 15 Min. Raub-Modus:
