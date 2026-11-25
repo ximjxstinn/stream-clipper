@@ -1283,22 +1283,45 @@ def make_vertical(src, out_path, style, runner, edit=None, reason="", log=None):
                 "-filter_complex", VERTICAL_FILTERS.get(style, VERTICAL_FILTERS["blur"]),
                 "-map", "[v]", "-map", "0:a?", "-c:v", "libx264", "-preset", "veryfast", "-crf", "21",
                 "-r", "30", "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", out_path], quiet=True)
-    if edit and edit.get("vc_on"):
-        tmp = out_path[:-4] + "_vc.mp4"
-        try:
-            vicecity_edit(out_path, tmp, edit, runner, reason, edit.get("channel") or "ximjxstinn", log)
-            if os.path.isfile(tmp) and os.path.getsize(tmp) > 10000:
-                os.replace(tmp, out_path)
-        except Cancelled:
-            raise
-        except Exception as e:
-            if log:
-                log(f"   ⚠ Vice-City-Edit ging nicht ({str(e)[:120]}) – normaler Clip bleibt")
-            try:
-                os.remove(tmp)
-            except OSError:
-                pass
+    if edit and edit.get("vc_on") and (edit.get("vc_tt", True) or edit.get("vc_yt", True)):
+        make_vc(out_path, edit, runner, reason, log)
     return out_path
+
+
+def vc_path(path):
+    """Datei mit Vice-City-Edit neben dem normalen Clip."""
+    return os.path.splitext(path)[0] + "_vc.mp4"
+
+
+def make_vc(path, edit, runner, reason="", log=None):
+    """Vice-City-Version neben den Clip legen (…_vc.mp4). Der normale Clip bleibt. Gibt den Pfad oder None."""
+    tmp = vc_path(path)
+    try:
+        vicecity_edit(path, tmp, edit, runner, reason, edit.get("channel") or "ximjxstinn", log)
+        if os.path.isfile(tmp) and os.path.getsize(tmp) > 10000:
+            return tmp
+    except Cancelled:
+        raise
+    except Exception as e:
+        if log:
+            log(f"   ⚠ Vice-City-Edit ging nicht ({str(e)[:120]}) – normaler Clip bleibt")
+    try:
+        os.remove(tmp)
+    except OSError:
+        pass
+    return None
+
+
+def upload_file(path, plat, edit, runner=None, reason="", log=None):
+    """Welche Datei geht zu TikTok/YouTube: mit Vice-City-Edit, wenn für die Plattform eingeschaltet."""
+    if not path or not edit or not edit.get("vc_on") or not edit.get("vc_" + plat, True):
+        return path
+    vp = vc_path(path)
+    if os.path.isfile(vp):
+        return vp
+    if runner is not None:
+        return make_vc(path, edit, runner, reason, log) or path
+    return path
 
 
 def make_bestof(clips, out_path, runner):
@@ -1327,7 +1350,7 @@ def safe_name(text, maxlen=40):
 # --------------------------------------------------------------------------- #
 #  🌴 Vice-City-Edit für TikTok: Neon-Look, Autocut-Zooms, Titel, Musik
 # --------------------------------------------------------------------------- #
-VC_DEFAULTS = {"vc_on": False, "vc_look": True, "vc_cut": True, "vc_title": True, "vc_music": "",
+VC_DEFAULTS = {"vc_tt": True, "vc_yt": True, "vc_on": False, "vc_look": True, "vc_cut": True, "vc_title": True, "vc_music": "",
                "vc_vol": 30, "vc_twitch": True}
 MUSIC_EXT = (".mp3", ".m4a", ".wav", ".ogg", ".aac", ".flac")
 
@@ -1409,13 +1432,23 @@ def vicecity_edit(src, out_path, opts, runner, reason="", channel="ximjxstinn", 
     """Hochkant-Clip (1080x1920) im Vice-City-Stil: Neon-Farben + Glow, Zooms/Wackler bei Action (Autocut),
     pinker Titel am Anfang, Twitch-Hinweis, Musik leise drunter. Gibt out_path zurück."""
     vf = []
+    W, H = 1080, 1920
+    try:
+        out = subprocess.run([tool("ffprobe"), "-v", "error", "-select_streams", "v:0", "-show_entries",
+                              "stream=width,height", "-of", "csv=p=0", src], capture_output=True, text=True,
+                             timeout=60, **({"creationflags": 0x08000000} if os.name == "nt" else {})).stdout
+        W, H = (int(x) for x in out.strip().split(",")[:2])
+        W, H = W - W % 2, H - H % 2
+    except Exception:
+        pass
+    k = min(W, H) / 1080.0  # Schrift/Wackeln mit der Bildgröße skalieren (Hochkant 1080x1920, YouTube 1920x1080)
     # Autocut: kurze Zoom-Ruckler + Wackeln genau bei den Knallen
     moments = action_moments(src) if opts.get("vc_cut", True) else []
     if moments:
         pulse = "+".join(f"0.13*max(0,1-abs(t-{m:.2f})/0.22)" for m in moments)
-        shake = "+".join(f"18*sin(t*70)*max(0,1-abs(t-{m:.2f})/0.18)" for m in moments)
-        vf.append(f"scale=w='trunc(1080*(1+{pulse})/2)*2':h='trunc(1920*(1+{pulse})/2)*2':eval=frame")
-        vf.append(f"crop=1080:1920:x='(iw-1080)/2+({shake})':y='(ih-1920)/2'")
+        shake = "+".join(f"{18 * k:.0f}*sin(t*70)*max(0,1-abs(t-{m:.2f})/0.18)" for m in moments)
+        vf.append(f"scale=w='trunc({W}*(1+{pulse})/2)*2':h='trunc({H}*(1+{pulse})/2)*2':eval=frame")
+        vf.append(f"crop={W}:{H}:x='(iw-{W})/2+({shake})':y='(ih-{H})/2'")
     if opts.get("vc_look", True):
         # Vice City: Pink in den Lichtern, Türkis/Blau in den Schatten, kräftige Farben, Vignette
         vf.append("eq=saturation=1.35:contrast=1.08:brightness=0.01")
@@ -1435,7 +1468,7 @@ def vicecity_edit(src, out_path, opts, runner, reason="", channel="ximjxstinn", 
         alpha = "if(lt(t,0.2),t/0.2,if(lt(t,3),1,if(lt(t,3.6),(3.6-t)/0.6,0)))"
         common = f"fontfile='{_ff_esc(font)}':textfile='{_ff_esc(tf)}':x=(w-text_w)/2:y=h*0.14:alpha='{alpha}'"
         # Glow (türkis, versetzt) + pinke Schrift mit dunklem Rand
-        fs = max(60, min(110, int(1500 / max(1, len(title)))))
+        fs = int(max(60, min(110, int(1500 / max(1, len(title))))) * k)
         vf.append(f"drawtext={common}:fontsize={fs}:fontcolor=0x00E5FF@0.55:x=(w-text_w)/2+6:y=h*0.14+6")
         vf.append(f"drawtext={common}:fontsize={fs}:fontcolor=0xFF2D95:borderw=5:bordercolor=0x2B0A3D")
     if font and opts.get("vc_twitch", True):
@@ -1443,7 +1476,7 @@ def vicecity_edit(src, out_path, opts, runner, reason="", channel="ximjxstinn", 
         with open(tf2, "w", encoding="utf-8") as f:
             f.write(f"twitch.tv/{channel}")
         tmp_txt.append(tf2)
-        vf.append(f"drawtext=fontfile='{_ff_esc(font)}':textfile='{_ff_esc(tf2)}':fontsize=46:fontcolor=white@0.9:"
+        vf.append(f"drawtext=fontfile='{_ff_esc(font)}':textfile='{_ff_esc(tf2)}':fontsize={int(46 * k)}:fontcolor=white@0.9:"
                   f"borderw=3:bordercolor=0xFF2D95:x=(w-text_w)/2:y=h*0.86")
     vf.append("format=yuv420p")
     music = pick_music(opts.get("vc_music") or "")

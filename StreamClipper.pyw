@@ -34,7 +34,7 @@ except ImportError:  # ältere Updater kennen live_clipper.py noch nicht → sel
     except Exception:
         live_clipper = None
 
-VERSION = "5.5"
+VERSION = "5.6"
 
 # Fertige Live-Profile für GTA 6 (jederzeit umschaltbar, gilt sofort – auch mitten im Stream)
 _ALL = ("cops", "siren", "shots", "explosion", "bluelight", "vision", "game", "voice", "chat", "clipreq")
@@ -386,7 +386,7 @@ class App:
             row=r, column=1, columnspan=2, sticky="we", pady=2)
         r += 1
         self.v_vc = tk.BooleanVar(value=s.get("vc_on", False))
-        ttk.Checkbutton(left, text="🌴 Vice-City-Edit für TikTok (Look, Autocut, Titel, Musik)", variable=self.v_vc,
+        ttk.Checkbutton(left, text="🌴 Vice-City-Edit für TikTok + YouTube (Look, Autocut, Titel, Musik)", variable=self.v_vc,
                         command=self._toggle_vc).grid(row=r, column=0, columnspan=2, sticky="w", pady=2)
         ttk.Button(left, text="Einstellen …", command=self.vc_settings).grid(row=r, column=2, sticky="e", pady=2)
         r += 1
@@ -1006,17 +1006,20 @@ class App:
         win.transient(self.root)
         f = ttk.Frame(win, style="Panel.TFrame", padding=16)
         f.pack(fill="both", expand=True, padx=12, pady=12)
-        ttk.Label(f, text="🌴 Vice-City-Edit für TikTok-Clips", style="Sec.TLabel").grid(row=0, column=0,
+        ttk.Label(f, text="🌴 Vice-City-Edit für TikTok & YouTube", style="Sec.TLabel").grid(row=0, column=0,
                                                                                        columnspan=3, sticky="w")
-        ttk.Label(f, text="Wird in jeden Hochkant-Clip eingebaut, bevor er hochgeladen wird (VOD + Live + PS5).",
+        ttk.Label(f, text="Wird vor dem Hochladen eingebaut (VOD + Live + PS5). Der normale Clip bleibt zusätzlich "
+                          "erhalten (…_vc.mp4 = mit Edit).",
                   style="Muted.TLabel", wraplength=470).grid(row=1, column=0, columnspan=3, sticky="w", pady=(0, 8))
         v = {k: tk.BooleanVar(value=self.s.get(k, core.VC_DEFAULTS[k]))
-             for k in ("vc_on", "vc_look", "vc_cut", "vc_title", "vc_twitch")}
+             for k in ("vc_on", "vc_look", "vc_cut", "vc_title", "vc_twitch", "vc_tt", "vc_yt")}
         rows = [("vc_on", "Vice-City-Edit einschalten"),
                 ("vc_look", "🎨 Neon-Look (Pink/Türkis, kräftige Farben, Vignette, Blitz bei Explosionen)"),
                 ("vc_cut", "✂ Autocut: Zoom + Wackler genau bei Schüssen, Crashs, Explosionen"),
                 ("vc_title", "🌴 Pinker Titel am Anfang (RAUBÜBERFALL, VERFOLGUNG, BOOM … automatisch)"),
-                ("vc_twitch", "📺 „twitch.tv/ximjxstinn“ unten einblenden")]
+                ("vc_twitch", "📺 „twitch.tv/ximjxstinn“ unten einblenden"),
+                ("vc_tt", "♪ für TikTok verwenden"),
+                ("vc_yt", "▶ für YouTube verwenden (Shorts und 16:9-Videos)")]
         r = 2
         for k, txt in rows:
             ttk.Checkbutton(f, text=txt, variable=v[k]).grid(row=r, column=0, columnspan=3, sticky="w")
@@ -2593,6 +2596,8 @@ class App:
         h = self.highlights[i]
         files = h.get("files") or {}
         path = files.get("tall") or files.get("wide")
+        if path and os.path.isfile(path):
+            path = core.upload_file(path, "tt", self.s)  # fertige Vice-City-Version nehmen, wenn es eine gibt
         if not path or not os.path.isfile(path):
             messagebox.showinfo("Auf TikTok posten", "Der Clip ist noch nicht geschnitten.")
             return
@@ -2830,6 +2835,9 @@ class App:
                     else:
                         self.log(f"⚠ Datei für Clip #{i + 1} nicht gefunden – übersprungen")
                         continue
+                path = core.upload_file(path, plat, self.s, self.runner, h.get("reason", ""), self.log)
+                if path.endswith("_vc.mp4"):
+                    self.log(f"   🌴 #{i + 1} mit Vice-City-Edit für {'YouTube' if plat == 'yt' else 'TikTok'}")
                 title, desc, tags = uploader.build_text(conf, src.get("title"), i + 1, h.get("reason", ""),
                                                         short=not wide_mode)
                 try:

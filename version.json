@@ -1,6 +1,6 @@
 {
-  "version": "5.5",
-  "notes": "Explosion nur noch bei echtem Feuerball + Knall + Action – Figurwechsel zählt nicht mehr",
+  "version": "5.6",
+  "notes": "Vice-City-Edit auch für YouTube (Shorts + 16:9), pro Plattform an/aus",
   "files": [
     "StreamClipper.pyw",
     "clipper_core.py",
