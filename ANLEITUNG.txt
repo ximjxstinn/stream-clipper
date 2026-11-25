@@ -18,7 +18,7 @@ NEU IN 5.2 – ♪ TIKTOK-ENTWÜRFE: WO SIE SIND + TAGESLIMIT
   - TikTok-Entwürfe landen NICHT unter „Entwürfe“, sondern als BENACHRICHTIGUNG in der TikTok-App:
     Posteingang (Inbox) → „Dein Video von Stream Clipper ist bereit“ antippen → bearbeiten → posten
     (oder dort als Entwurf speichern). Erst dann stehen sie bei deinen Entwürfen.
-  - TikTok erlaubt höchstens 5 offene Entwürfe pro 24 Std. Alles darüber hat TikTok bisher still verworfen.
+  - TikTok erlaubt höchstens 5 offene Entwürfe pro 24 Std. Clips darüber kommen oft nicht an.
     Jetzt zählt die App mit: Clips über dem Limit warten (⏳ in der Liste) und werden automatisch nachgeladen,
     sobald wieder Platz ist – die spannendsten zuerst.
   - Live gehen nur Top-Clips (ab 50 Spannungs-Punkten) sofort zu TikTok, damit die 5 Plätze nicht für
