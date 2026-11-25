@@ -409,8 +409,7 @@ def LIVE_IN(url):
     und in Echtzeit lesen – sonst rattert ffmpeg alte Minuten durch und die Erkennung sieht Vergangenes."""
     if not str(url).startswith("http"):
         return []
-    return ["-use_wallclock_as_timestamps", "1", "-live_start_index", "-2", "-reconnect", "1",
-            "-reconnect_streamed", "1", "-reconnect_delay_max", "5"]
+    return ["-live_start_index", "-2", "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5"]
 
 
 def _stream_url(channel, fmt):
@@ -593,9 +592,15 @@ class VideoReader(threading.Thread):
                     url = self.source or _stream_url(self.channel, "160p/160p30/360p/worst[vcodec!=none]/worst")
                     inp = [*LIVE_IN(url), "-i", url]
                     self.last_frame = time.time()
+                if self.input_args or self.source:
+                    vf = ["-vf", f"fps=4,scale={VW}:{VH}"]
+                else:
+                    # Twitch live: jedes 8. Bild (30 fps → ~4/s), ohne Zeitstempel-Rechnerei – die Zeitsprünge im
+                    # PS5-Stream ließen den fps-Filter tausende Bilder verdoppeln bzw. fast keine mehr liefern
+                    vf = ["-vf", f"select=not(mod(n\\,8)),scale={VW}:{VH}", "-fps_mode", "passthrough"]
                 self.proc = subprocess.Popen(
                     [core.tool("ffmpeg"), "-hide_banner", "-loglevel", "error", "-nostats", *inp, "-an",
-                     "-vf", f"fps=4,scale={VW}:{VH}", "-pix_fmt", "rgb24", "-f", "rawvideo", "-"],
+                     *vf, "-pix_fmt", "rgb24", "-f", "rawvideo", "-"],
                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, **kw)
                 prev = None
                 while not self.stop.is_set():
@@ -609,10 +614,16 @@ class VideoReader(threading.Thread):
                     self.last_frame = now_r
                     # Schutz gegen Bild-Schwall (Zeitsprünge bei Werbung/PS5-Stream → ffmpeg liefert tausende
                     # doppelte Bilder): höchstens ~5 Bilder pro Sekunde auswerten, Rest verwerfen
-                    if not self.source and not self.input_args and now_r - getattr(self, "_last_used", 0) < 0.2:
-                        self.dropped = getattr(self, "dropped", 0) + 1
-                        continue
-                    self._last_used = now_r
+                    if not self.source and not self.input_args:
+                        win = getattr(self, "_win", None)
+                        if win is None:
+                            win = self._win = deque()
+                        while win and win[0] < now_r - 1.0:
+                            win.popleft()
+                        if len(win) >= 12:  # Schwall (z. B. aufgestaute Minuten) → verwerfen
+                            self.dropped = getattr(self, "dropped", 0) + 1
+                            continue
+                        win.append(now_r)
                     self.frames += 1
                     motion, red, blue, prev = analyze_video_frame(raw, prev)
                     now_t = time.time()

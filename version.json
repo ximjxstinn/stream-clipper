@@ -1,6 +1,6 @@
 {
-  "version": "4.8.2",
-  "notes": "Fix: Live-Bild beim PS5-Stream (Bild-Schwall/Hänger) – Cops/Explosionen werden wieder erkannt",
+  "version": "4.8.3",
+  "notes": "Fix: Live-Bild beim PS5-Stream lieferte zu wenige Bilder – jetzt gleichmäßig ~4 pro Sekunde",
   "files": [
     "StreamClipper.pyw",
     "clipper_core.py",
